@@ -88,7 +88,7 @@ class VoiceReceiver:
     completed utterances via a callback.
     """
 
-    SILENCE_THRESHOLD = 1.5    # seconds of silence → end of utterance
+    SILENCE_THRESHOLD = 1.0    # seconds of silence → end of utterance
     MIN_SPEECH_DURATION = 0.5  # minimum seconds to process (skip noise)
     SAMPLE_RATE = 48000        # Discord native rate
     CHANNELS = 2               # Discord sends stereo
@@ -116,9 +116,6 @@ class VoiceReceiver:
 
         # Pause flag: don't capture while bot is playing TTS
         self._paused = False
-
-        # Debug logging counter (instance-level to avoid cross-instance races)
-        self._packet_debug_count = 0
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -176,13 +173,14 @@ class VoiceReceiver:
         receiver_self = self
 
         async def wrapped_hook(ws, msg):
-            if isinstance(msg, dict) and msg.get("op") == 5:
+            if isinstance(msg, dict):
+                op = msg.get("op")
                 data = msg.get("d", {})
-                ssrc = data.get("ssrc")
-                user_id = data.get("user_id")
-                if ssrc and user_id:
-                    logger.info("SPEAKING event: ssrc=%d -> user=%s", ssrc, user_id)
-                    receiver_self.map_ssrc(int(ssrc), int(user_id))
+                if op == 5:
+                    ssrc = data.get("ssrc")
+                    user_id = data.get("user_id")
+                    if ssrc and user_id:
+                        receiver_self.map_ssrc(int(ssrc), int(user_id))
             if original_hook:
                 await original_hook(ws, msg)
 
@@ -193,9 +191,8 @@ class VoiceReceiver:
             from discord.utils import MISSING
             if hasattr(conn, 'ws') and conn.ws is not MISSING:
                 conn.ws._hook = wrapped_hook
-                logger.info("Speaking hook installed on live websocket")
-        except Exception as e:
-            logger.warning("Could not install hook on live ws: %s", e)
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------
     # Packet handler (called from SocketReader thread)
@@ -205,14 +202,6 @@ class VoiceReceiver:
         if not self._running or self._paused:
             return
 
-        # Log first few raw packets for debugging
-        self._packet_debug_count += 1
-        if self._packet_debug_count <= 5:
-            logger.debug(
-                "Raw UDP packet: len=%d, first_bytes=%s",
-                len(data), data[:4].hex() if len(data) >= 4 else "short",
-            )
-
         if len(data) < 16:
             return
 
@@ -220,8 +209,6 @@ class VoiceReceiver:
         # Lower bits may vary (padding, extension, CSRC count).
         # Payload type (byte 1 lower 7 bits) = 0x78 (120) for voice.
         if (data[0] >> 6) != 2 or (data[1] & 0x7F) != 0x78:
-            if self._packet_debug_count <= 5:
-                logger.debug("Skipped non-RTP: byte0=0x%02x byte1=0x%02x", data[0], data[1])
             return
 
         first_byte = data[0]
@@ -246,14 +233,6 @@ class VoiceReceiver:
             ext_words = struct.unpack_from(">H", data, ext_preamble_offset + 2)[0]
             ext_data_len = ext_words * 4
 
-        if self._packet_debug_count <= 10:
-            with self._lock:
-                known_user = self._ssrc_to_user.get(ssrc, "unknown")
-            logger.debug(
-                "RTP packet: ssrc=%d, seq=%d, user=%s, hdr=%d, ext_data=%d",
-                ssrc, seq, known_user, header_size, ext_data_len,
-            )
-
         header = bytes(data[:header_size])
         payload_with_nonce = data[header_size:]
 
@@ -268,9 +247,7 @@ class VoiceReceiver:
             import nacl.secret  # noqa: delayed import – only in voice path
             box = nacl.secret.Aead(self._secret_key)
             decrypted = box.decrypt(encrypted, header, bytes(nonce))
-        except Exception as e:
-            if self._packet_debug_count <= 10:
-                logger.warning("NaCl decrypt failed: %s (hdr=%d, enc=%d)", e, header_size, len(encrypted))
+        except Exception:
             return
 
         # Skip encrypted extension data to get the actual opus payload
@@ -279,23 +256,35 @@ class VoiceReceiver:
 
         # --- DAVE E2EE decrypt ---
         if self._dave_session:
+            import davey
             with self._lock:
                 user_id = self._ssrc_to_user.get(ssrc, 0)
-            if user_id:
+            if user_id == 0:
+                # SSRC not yet mapped — probe all known DAVE members to discover it.
                 try:
-                    import davey
+                    candidate_ids = [int(uid) for uid in self._dave_session.get_user_ids()]
+                except Exception:
+                    candidate_ids = []
+                discovered = 0
+                for cid in candidate_ids:
+                    try:
+                        decrypted = self._dave_session.decrypt(cid, davey.MediaType.audio, decrypted)
+                        discovered = cid
+                        break
+                    except Exception:
+                        pass
+                if discovered:
+                    with self._lock:
+                        self._ssrc_to_user[ssrc] = discovered
+                else:
+                    return
+            else:
+                try:
                     decrypted = self._dave_session.decrypt(
                         user_id, davey.MediaType.audio, decrypted
                     )
-                except Exception as e:
-                    # Unencrypted passthrough — use NaCl-decrypted data as-is
-                    if "Unencrypted" not in str(e):
-                        if self._packet_debug_count <= 10:
-                            logger.warning("DAVE decrypt failed for ssrc=%d: %s", ssrc, e)
-                        return
-            # If SSRC unknown (no SPEAKING event yet), skip DAVE and try
-            # Opus decode directly — audio may be in passthrough mode.
-            # Buffer will get a user_id when SPEAKING event arrives later.
+                except Exception:
+                    return
 
         # --- Opus decode -> PCM ---
         try:
@@ -1100,11 +1089,14 @@ class DiscordAdapter(BasePlatformAdapter):
         wav_path = tmp_f.name
         tmp_f.close()
         try:
+            t0 = time.monotonic()
             await asyncio.to_thread(VoiceReceiver.pcm_to_wav, pcm_data, wav_path)
+            t1 = time.monotonic()
 
             from tools.transcription_tools import transcribe_audio, get_stt_model_from_config
             stt_model = get_stt_model_from_config()
             result = await asyncio.to_thread(transcribe_audio, wav_path, model=stt_model)
+            t2 = time.monotonic()
 
             if not result.get("success"):
                 return
@@ -1112,14 +1104,16 @@ class DiscordAdapter(BasePlatformAdapter):
             if not transcript or is_whisper_hallucination(transcript):
                 return
 
-            logger.info("Voice input from user %d: %s", user_id, transcript[:100])
+            logger.info("[voice latency] wav=%.2fs stt=%.2fs | %s", t1 - t0, t2 - t1, transcript[:80])
 
             if self._voice_input_callback:
+                t3 = time.monotonic()
                 await self._voice_input_callback(
                     guild_id=guild_id,
                     user_id=user_id,
                     transcript=transcript,
                 )
+            logger.info("[voice latency] llm+tts=%.2fs total=%.2fs", time.monotonic() - t3, time.monotonic() - t0)
         except Exception as e:
             logger.warning("Voice input processing failed: %s", e, exc_info=True)
         finally:

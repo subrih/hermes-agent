@@ -6217,6 +6217,11 @@ class AIAgent:
                             response_invalid = True
                             error_details.append("response.content is not a list")
                         elif len(content_blocks) == 0:
+                            if self.quiet_mode:
+                                # Empty content in quiet mode (e.g. memory flush) means
+                                # the agent had nothing to do — valid no-op, not an error.
+                                self._persist_session(messages, conversation_history)
+                                return {"messages": messages, "completed": True, "api_calls": api_call_count}
                             response_invalid = True
                             error_details.append("response.content is empty")
                     else:
