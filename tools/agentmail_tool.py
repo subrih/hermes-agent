@@ -146,9 +146,10 @@ registry.register(
     schema={
         "name": "agentmail",
         "description": (
-            "Kaveri's dedicated agent email inbox (kaveri@agentmail.to) via AgentMail. "
-            "Use for sending emails to Subri or others, reading Kaveri's inbox, and managing email threads. "
-            "Always uses Kaveri's rotating signature when sending. "
+            "Kaveri's dedicated email inbox (kaveri@agentmail.to). "
+            "Call this tool DIRECTLY to send or read emails — do NOT delegate via moa or delegation. "
+            "Use for sending emails to Subri or others, reading inbox, and managing email threads. "
+            "Appends Kaveri's rotating signature automatically when sending. "
             "Actions: list (inbox), get (specific message), send (compose+send), delete."
         ),
         "parameters": {
