@@ -57,6 +57,7 @@ class Platform(Enum):
     DINGTALK = "dingtalk"
     API_SERVER = "api_server"
     WEBHOOK = "webhook"
+    BLUEBUBBLES = "bluebubbles"
 
 
 @dataclass
@@ -811,6 +812,25 @@ def _apply_env_overrides(config: GatewayConfig) -> None:
         if webhook_secret:
             config.platforms[Platform.WEBHOOK].extra["secret"] = webhook_secret
 
+    # BlueBubbles
+    bb_url = os.getenv("BLUEBUBBLES_URL")
+    bb_password = os.getenv("BLUEBUBBLES_PASSWORD")
+    if bb_url and bb_password:
+        if Platform.BLUEBUBBLES not in config.platforms:
+            config.platforms[Platform.BLUEBUBBLES] = PlatformConfig()
+        config.platforms[Platform.BLUEBUBBLES].enabled = True
+        config.platforms[Platform.BLUEBUBBLES].extra.update({
+            "url": bb_url,
+            "password": bb_password,
+            "webhook_port": int(os.getenv("WEBHOOK_PORT", "5555")),
+        })
+        bb_home = os.getenv("BLUEBUBBLES_HOME_CHANNEL")
+        if bb_home:
+            config.platforms[Platform.BLUEBUBBLES].home_channel = HomeChannel(
+                platform=Platform.BLUEBUBBLES,
+                chat_id=bb_home,
+                name=os.getenv("BLUEBUBBLES_HOME_CHANNEL_NAME", "Home"),
+            )
     # Session settings
     idle_minutes = os.getenv("SESSION_IDLE_MINUTES")
     if idle_minutes:

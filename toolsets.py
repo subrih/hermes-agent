@@ -208,6 +208,12 @@ TOOLSETS = {
         "includes": []
     },
 
+    "agentmail": {
+        "description": "Kaveri's dedicated agent email inbox (kaveri@agentmail.to)",
+        "tools": ["agentmail"],
+        "includes": []
+    },
+
 
     # Scenario-specific toolsets
     
