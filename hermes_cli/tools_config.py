@@ -137,6 +137,7 @@ PLATFORMS = {
     "email":    {"label": "📧 Email",      "default_toolset": "hermes-email"},
     "matrix":   {"label": "💬 Matrix",     "default_toolset": "hermes-matrix"},
     "dingtalk": {"label": "💬 DingTalk",   "default_toolset": "hermes-dingtalk"},
+    "bluebubbles": {"label": "💬 BlueBubbles", "default_toolset": "hermes-bluebubbles"},
     "api_server": {"label": "🌐 API Server", "default_toolset": "hermes-api-server"},
 }
 
