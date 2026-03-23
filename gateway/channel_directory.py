@@ -8,6 +8,7 @@ action="list" and for resolving human-friendly channel names to numeric IDs.
 
 import json
 import logging
+import re
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -190,9 +191,14 @@ def resolve_channel_name(platform_name: str, name: str) -> Optional[str]:
 
     query = name.lstrip("#").lower()
 
-    # 1. Exact name match
+    def _strip_emoji(s: str) -> str:
+        """Strip leading non-word characters (emojis, decorators) from a channel name."""
+        return re.sub(r'^[^\w\-]+', '', s).lower()
+
+    # 1. Exact name match (also try stripping emoji prefix from stored name)
     for ch in channels:
-        if ch["name"].lower() == query:
+        ch_lower = ch["name"].lower()
+        if ch_lower == query or _strip_emoji(ch["name"]) == query:
             return ch["id"]
 
     # 2. Guild-qualified match for Discord ("GuildName/channel")
@@ -200,11 +206,15 @@ def resolve_channel_name(platform_name: str, name: str) -> Optional[str]:
         guild_part, ch_part = query.rsplit("/", 1)
         for ch in channels:
             guild = ch.get("guild", "").lower()
-            if guild == guild_part and ch["name"].lower() == ch_part:
+            ch_lower = ch["name"].lower()
+            if guild == guild_part and (ch_lower == ch_part or _strip_emoji(ch["name"]) == ch_part):
                 return ch["id"]
 
-    # 3. Partial prefix match (only if unambiguous)
-    matches = [ch for ch in channels if ch["name"].lower().startswith(query)]
+    # 3. Partial prefix match (only if unambiguous) — also match against emoji-stripped names
+    matches = [
+        ch for ch in channels
+        if ch["name"].lower().startswith(query) or _strip_emoji(ch["name"]).startswith(query)
+    ]
     if len(matches) == 1:
         return matches[0]["id"]
 
