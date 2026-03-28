@@ -43,6 +43,7 @@ logger = logging.getLogger(__name__)
 import importlib.util as _ilu
 _HAS_FASTER_WHISPER = _ilu.find_spec("faster_whisper") is not None
 _HAS_OPENAI = _ilu.find_spec("openai") is not None
+_HAS_GOOGLE_GENAI = _ilu.find_spec("google.genai") is not None
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -53,6 +54,7 @@ DEFAULT_LOCAL_MODEL = "base"
 DEFAULT_LOCAL_STT_LANGUAGE = "en"
 DEFAULT_STT_MODEL = os.getenv("STT_OPENAI_MODEL", "whisper-1")
 DEFAULT_GROQ_STT_MODEL = os.getenv("STT_GROQ_MODEL", "whisper-large-v3-turbo")
+DEFAULT_GEMINI_STT_MODEL = os.getenv("STT_GEMINI_MODEL", "gemini-2.0-flash")
 LOCAL_STT_COMMAND_ENV = "HERMES_LOCAL_STT_COMMAND"
 LOCAL_STT_LANGUAGE_ENV = "HERMES_LOCAL_STT_LANGUAGE"
 COMMON_LOCAL_BIN_DIRS = ("/opt/homebrew/bin", "/usr/local/bin")
@@ -214,6 +216,14 @@ def _get_provider(stt_config: dict) -> str:
                 return "openai"
             logger.warning(
                 "STT provider 'openai' configured but no API key available"
+            )
+            return "none"
+
+        if provider == "gemini":
+            if _HAS_GOOGLE_GENAI and (os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")):
+                return "gemini"
+            logger.warning(
+                "STT provider 'gemini' configured but GEMINI_API_KEY not set or google-genai not installed"
             )
             return "none"
 
@@ -483,6 +493,67 @@ def _transcribe_openai(file_path: str, model_name: str) -> Dict[str, Any]:
         return {"success": False, "transcript": "", "error": f"Transcription failed: {e}"}
 
 # ---------------------------------------------------------------------------
+# Provider: gemini (Google Gemini API)
+# ---------------------------------------------------------------------------
+
+_GEMINI_MIME_TYPES = {
+    ".mp3": "audio/mpeg",
+    ".mp4": "audio/mp4",
+    ".mpeg": "audio/mpeg",
+    ".mpga": "audio/mpeg",
+    ".m4a": "audio/mp4",
+    ".wav": "audio/wav",
+    ".webm": "audio/webm",
+    ".ogg": "audio/ogg",
+}
+_GEMINI_INLINE_MAX = 20 * 1024 * 1024  # 20 MB — use inline bytes below this
+
+
+def _transcribe_gemini(file_path: str, model_name: str) -> Dict[str, Any]:
+    """Transcribe using the Google Gemini API."""
+    api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+    if not api_key:
+        return {"success": False, "transcript": "", "error": "GEMINI_API_KEY not set"}
+
+    if not _HAS_GOOGLE_GENAI:
+        return {"success": False, "transcript": "", "error": "google-genai package not installed"}
+
+    audio_path = Path(file_path)
+    mime_type = _GEMINI_MIME_TYPES.get(audio_path.suffix.lower(), "audio/wav")
+
+    try:
+        from google import genai
+        from google.genai import types
+
+        client = genai.Client(api_key=api_key)
+        file_size = audio_path.stat().st_size
+
+        if file_size <= _GEMINI_INLINE_MAX:
+            audio_bytes = audio_path.read_bytes()
+            audio_part = types.Part.from_bytes(data=audio_bytes, mime_type=mime_type)
+        else:
+            uploaded = client.files.upload(path=file_path)
+            audio_part = types.Part.from_uri(file_uri=uploaded.uri, mime_type=mime_type)
+
+        response = client.models.generate_content(
+            model=model_name,
+            contents=[
+                audio_part,
+                "Transcribe this audio exactly as spoken. Return only the transcription text, no commentary.",
+            ],
+        )
+
+        transcript_text = (response.text or "").strip()
+        logger.info("Transcribed %s via Gemini API (%s, %d chars)",
+                    audio_path.name, model_name, len(transcript_text))
+
+        return {"success": True, "transcript": transcript_text, "provider": "gemini"}
+
+    except Exception as e:
+        logger.error("Gemini transcription failed: %s", e, exc_info=True)
+        return {"success": False, "transcript": "", "error": f"Gemini transcription failed: {e}"}
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
@@ -542,6 +613,11 @@ def transcribe_audio(file_path: str, model: Optional[str] = None) -> Dict[str, A
         openai_cfg = stt_config.get("openai", {})
         model_name = model or openai_cfg.get("model", DEFAULT_STT_MODEL)
         return _transcribe_openai(file_path, model_name)
+
+    if provider == "gemini":
+        gemini_cfg = stt_config.get("gemini", {})
+        model_name = model or gemini_cfg.get("model", DEFAULT_GEMINI_STT_MODEL)
+        return _transcribe_gemini(file_path, model_name)
 
     # No provider available
     return {
