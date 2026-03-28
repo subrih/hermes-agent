@@ -55,6 +55,7 @@ DEFAULT_LOCAL_STT_LANGUAGE = "en"
 DEFAULT_STT_MODEL = os.getenv("STT_OPENAI_MODEL", "whisper-1")
 DEFAULT_GROQ_STT_MODEL = os.getenv("STT_GROQ_MODEL", "whisper-large-v3-turbo")
 DEFAULT_GEMINI_STT_MODEL = os.getenv("STT_GEMINI_MODEL", "gemini-2.0-flash")
+DEFAULT_GEMINI_LIVE_MODEL = os.getenv("STT_GEMINI_LIVE_MODEL", "gemini-3.1-flash-live-preview")
 LOCAL_STT_COMMAND_ENV = "HERMES_LOCAL_STT_COMMAND"
 LOCAL_STT_LANGUAGE_ENV = "HERMES_LOCAL_STT_LANGUAGE"
 COMMON_LOCAL_BIN_DIRS = ("/opt/homebrew/bin", "/usr/local/bin")
@@ -92,6 +93,20 @@ def get_stt_model_from_config() -> Optional[str]:
             with open(cfg_path) as f:
                 data = yaml.safe_load(f) or {}
             return data.get("stt", {}).get("model")
+    except Exception:
+        pass
+    return None
+
+
+def get_stt_provider_from_config() -> Optional[str]:
+    """Read the STT provider name from ~/.hermes/config.yaml."""
+    try:
+        import yaml
+        cfg_path = get_hermes_home() / "config.yaml"
+        if cfg_path.exists():
+            with open(cfg_path) as f:
+                data = yaml.safe_load(f) or {}
+            return data.get("stt", {}).get("provider")
     except Exception:
         pass
     return None
@@ -219,11 +234,12 @@ def _get_provider(stt_config: dict) -> str:
             )
             return "none"
 
-        if provider == "gemini":
+        if provider in ("gemini", "gemini_live"):
             if _HAS_GOOGLE_GENAI and (os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")):
-                return "gemini"
+                return provider
             logger.warning(
-                "STT provider 'gemini' configured but GEMINI_API_KEY not set or google-genai not installed"
+                "STT provider '%s' configured but GEMINI_API_KEY not set or google-genai not installed",
+                provider,
             )
             return "none"
 
@@ -552,6 +568,72 @@ def _transcribe_gemini(file_path: str, model_name: str) -> Dict[str, Any]:
     except Exception as e:
         logger.error("Gemini transcription failed: %s", e, exc_info=True)
         return {"success": False, "transcript": "", "error": f"Gemini transcription failed: {e}"}
+
+# ---------------------------------------------------------------------------
+# Provider: gemini_live (Gemini Live API — streaming, low-latency)
+# ---------------------------------------------------------------------------
+
+
+async def transcribe_audio_live(wav_path: str, model: Optional[str] = None) -> Dict[str, Any]:
+    """Transcribe a WAV file using the Gemini Live streaming API.
+
+    Reads raw PCM from the WAV, opens a Gemini Live session, streams the
+    audio, enables inputAudioTranscription, and collects the transcript.
+
+    Args:
+        wav_path: Path to a 16kHz mono WAV file (as produced by pcm_to_wav).
+        model:    Gemini Live model ID override.
+
+    Returns:
+        Same dict shape as transcribe_audio().
+    """
+    api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+    if not api_key:
+        return {"success": False, "transcript": "", "error": "GEMINI_API_KEY not set"}
+    if not _HAS_GOOGLE_GENAI:
+        return {"success": False, "transcript": "", "error": "google-genai package not installed"}
+
+    model_name = model or DEFAULT_GEMINI_LIVE_MODEL
+
+    try:
+        import wave as _wave
+        from google import genai
+        from google.genai import types
+
+        with _wave.open(wav_path, "rb") as wf:
+            sample_rate = wf.getframerate()
+            pcm_bytes = wf.readframes(wf.getnframes())
+
+        client = genai.Client(api_key=api_key)
+        config = types.LiveConnectConfig(
+            response_modalities=["TEXT"],
+            input_audio_transcription=types.AudioTranscriptionConfig(),
+        )
+
+        transcript_parts: list[str] = []
+        async with client.aio.live.connect(model=model_name, config=config) as session:
+            await session.send_realtime_input(
+                audio=types.Blob(data=pcm_bytes, mime_type=f"audio/pcm;rate={sample_rate}"),
+            )
+            await session.send_realtime_input(activity_end=types.ActivityEnd())
+
+            async for msg in session.receive():
+                sc = getattr(msg, "server_content", None)
+                if sc:
+                    it = getattr(sc, "input_transcription", None)
+                    if it:
+                        transcript_parts.append(getattr(it, "text", "") or "")
+                    if getattr(sc, "turn_complete", False):
+                        break
+
+        transcript = "".join(transcript_parts).strip()
+        logger.info("Transcribed %s via Gemini Live (%s, %d chars)",
+                    Path(wav_path).name, model_name, len(transcript))
+        return {"success": True, "transcript": transcript, "provider": "gemini_live"}
+
+    except Exception as e:
+        logger.error("Gemini Live transcription failed: %s", e, exc_info=True)
+        return {"success": False, "transcript": "", "error": f"Gemini Live transcription failed: {e}"}
 
 # ---------------------------------------------------------------------------
 # Public API
