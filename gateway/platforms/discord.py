@@ -117,6 +117,13 @@ class VoiceReceiver:
         # Pause flag: don't capture while bot is playing TTS
         self._paused = False
 
+        # Live streaming (Gemini Live API) — enabled via enable_live_streaming()
+        self._live_streamers: Dict[int, Any] = {}   # ssrc -> GeminiLiveStreamer
+        self._live_loop: Optional[asyncio.AbstractEventLoop] = None
+        self._live_transcript_cb = None  # async(user_id, transcript)
+        self._live_api_key: Optional[str] = None
+        self._live_model: Optional[str] = None
+
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
@@ -136,6 +143,7 @@ class VoiceReceiver:
     def stop(self):
         """Stop listening and clean up."""
         self._running = False
+        self.disable_live_streaming()
         try:
             self._vc._connection.remove_socket_listener(self._on_packet)
         except Exception:
@@ -294,9 +302,59 @@ class VoiceReceiver:
             with self._lock:
                 self._buffers[ssrc].extend(pcm)
                 self._last_packet_time[ssrc] = time.monotonic()
+                live_user_id = self._ssrc_to_user.get(ssrc, 0) if self._live_loop else 0
         except Exception as e:
             logger.debug("Opus decode error for SSRC %s: %s", ssrc, e)
             return
+
+        # --- Live streaming path (Gemini Live) ---
+        if live_user_id and self._live_loop and self._live_transcript_cb:
+            self._push_to_live_streamer(ssrc, live_user_id, bytes(pcm))
+
+    # ------------------------------------------------------------------
+    # Live streaming (Gemini Live API)
+    # ------------------------------------------------------------------
+
+    def enable_live_streaming(
+        self,
+        loop: asyncio.AbstractEventLoop,
+        api_key: str,
+        model: str,
+        transcript_cb,  # async(user_id: int, transcript: str)
+    ) -> None:
+        """Enable real-time streaming transcription via Gemini Live."""
+        self._live_loop = loop
+        self._live_api_key = api_key
+        self._live_model = model
+        self._live_transcript_cb = transcript_cb
+
+    def disable_live_streaming(self) -> None:
+        """Stop all live streamers and clear state."""
+        self._live_loop = None
+        self._live_transcript_cb = None
+        for streamer in self._live_streamers.values():
+            streamer.stop()
+        self._live_streamers.clear()
+
+    def _push_to_live_streamer(self, ssrc: int, user_id: int, pcm: bytes) -> None:
+        """Route decoded PCM to the user's Gemini Live streamer, creating one if needed."""
+        if ssrc not in self._live_streamers:
+            from tools.transcription_tools import GeminiLiveStreamer
+            streamer = GeminiLiveStreamer(
+                self._live_api_key, self._live_model, self._live_loop
+            )
+            cb = self._live_transcript_cb
+            uid = user_id
+
+            async def _on_transcript(text: str) -> None:
+                if cb:
+                    await cb(uid, text)
+
+            streamer.start(_on_transcript)
+            self._live_streamers[ssrc] = streamer
+            logger.info("Started Gemini Live streamer for user %d (SSRC %d)", user_id, ssrc)
+
+        self._live_streamers[ssrc].push_pcm(pcm)
 
     # ------------------------------------------------------------------
     # Silence detection
@@ -852,6 +910,33 @@ class DiscordAdapter(BasePlatformAdapter):
             receiver = VoiceReceiver(vc, allowed_user_ids=self._allowed_user_ids)
             receiver.start()
             self._voice_receivers[guild_id] = receiver
+
+            # Enable real-time streaming if configured
+            from tools.transcription_tools import get_stt_provider_from_config, DEFAULT_GEMINI_LIVE_MODEL
+            stt_provider = get_stt_provider_from_config()
+            if stt_provider == "gemini_live":
+                api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+                if api_key:
+                    try:
+                        import yaml
+                        from hermes_constants import get_hermes_home
+                        cfg = yaml.safe_load((get_hermes_home() / "config.yaml").read_text()) or {}
+                    except Exception:
+                        cfg = {}
+                    live_model = cfg.get("stt", {}).get("gemini_live", {}).get("model", DEFAULT_GEMINI_LIVE_MODEL)
+                    loop = asyncio.get_event_loop()
+                    gid = guild_id
+                    vc_cb = self._voice_input_callback
+
+                    async def _live_cb(uid: int, text: str) -> None:
+                        if vc_cb:
+                            await vc_cb(guild_id=gid, user_id=uid, transcript=text)
+
+                    receiver.enable_live_streaming(loop, api_key, live_model, _live_cb)
+                    logger.info("Gemini Live streaming enabled for guild %d (%s)", guild_id, live_model)
+                else:
+                    logger.warning("gemini_live provider configured but GEMINI_API_KEY not set")
+
             self._voice_listen_tasks[guild_id] = asyncio.ensure_future(
                 self._voice_listen_loop(guild_id)
             )
@@ -1071,11 +1156,13 @@ class DiscordAdapter(BasePlatformAdapter):
                     except Exception:
                         pass
 
-                completed = receiver.check_silence()
-                for user_id, pcm_data in completed:
-                    if not self._is_allowed_user(str(user_id)):
-                        continue
-                    await self._process_voice_input(guild_id, user_id, pcm_data)
+                # Skip silence-detection when Gemini Live handles transcription
+                if not receiver._live_loop:
+                    completed = receiver.check_silence()
+                    for user_id, pcm_data in completed:
+                        if not self._is_allowed_user(str(user_id)):
+                            continue
+                        await self._process_voice_input(guild_id, user_id, pcm_data)
         except asyncio.CancelledError:
             pass
         except Exception as e:

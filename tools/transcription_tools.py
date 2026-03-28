@@ -23,14 +23,16 @@ Usage::
         print(result["transcript"])
 """
 
+import asyncio
 import logging
 import os
 import shlex
 import shutil
+import struct as _struct
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Any, Callable, Dict, Optional
 
 from hermes_constants import get_hermes_home
 
@@ -572,6 +574,124 @@ def _transcribe_gemini(file_path: str, model_name: str) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Provider: gemini_live (Gemini Live API — streaming, low-latency)
 # ---------------------------------------------------------------------------
+
+
+def _downsample_48k_stereo_to_16k_mono(pcm_bytes: bytes) -> bytes:
+    """Convert 48kHz stereo 16-bit LE PCM to 16kHz mono 16-bit LE PCM.
+
+    Uses integer 3:1 decimation with stereo mix.  Fast enough for real-time
+    20ms Discord Opus frames (~3840 bytes stereo → ~640 bytes mono).
+    """
+    n_frames = len(pcm_bytes) // 4  # 4 bytes per stereo pair
+    if n_frames == 0:
+        return b""
+    samples = _struct.unpack_from(f"<{n_frames * 2}h", pcm_bytes)
+    result = [(samples[i * 2] + samples[i * 2 + 1]) >> 1 for i in range(0, n_frames, 3)]
+    return _struct.pack(f"<{len(result)}h", *result)
+
+
+class GeminiLiveStreamer:
+    """Real-time streaming transcription via the Gemini Live WebSocket API.
+
+    One instance per speaker.  ``push_pcm()`` is thread-safe and can be
+    called from the Discord socket thread; the Gemini session runs on the
+    provided asyncio event loop.
+
+    Lifecycle::
+
+        streamer = GeminiLiveStreamer(api_key, model, loop)
+        streamer.start(async_callback)   # callback(transcript: str)
+        streamer.push_pcm(raw_pcm_48k)  # called per Opus frame
+        streamer.stop()                  # on voice channel leave
+    """
+
+    def __init__(self, api_key: str, model: str, loop: asyncio.AbstractEventLoop):
+        self._api_key = api_key
+        self._model = model
+        self._loop = loop
+        self._queue: asyncio.Queue = asyncio.Queue(maxsize=1000)
+        self._task: Optional[asyncio.Task] = None
+        self._callback: Optional[Callable] = None
+        self._running = False
+
+    def push_pcm(self, pcm_48k_stereo: bytes) -> None:
+        """Thread-safe: enqueue a 48kHz stereo PCM chunk from socket thread."""
+        if self._running and not self._queue.full():
+            self._loop.call_soon_threadsafe(self._queue.put_nowait, pcm_48k_stereo)
+
+    def start(self, callback: Callable) -> None:
+        """Start the Gemini Live session.  ``callback`` is async(transcript: str)."""
+        self._callback = callback
+        self._running = True
+        self._task = self._loop.create_task(self._run())
+
+    def stop(self) -> None:
+        self._running = False
+        if self._task:
+            self._task.cancel()
+            self._task = None
+
+    async def _run(self) -> None:
+        try:
+            from google import genai
+            from google.genai import types
+
+            client = genai.Client(api_key=self._api_key)
+            config = types.LiveConnectConfig(
+                response_modalities=["TEXT"],
+                input_audio_transcription=types.AudioTranscriptionConfig(),
+            )
+
+            async with client.aio.live.connect(model=self._model, config=config) as session:
+                await asyncio.gather(
+                    self._sender(session),
+                    self._receiver(session),
+                    return_exceptions=True,
+                )
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.error("GeminiLiveStreamer session error: %s", e, exc_info=True)
+
+    async def _sender(self, session) -> None:
+        from google.genai import types
+        while self._running:
+            try:
+                chunk = await asyncio.wait_for(self._queue.get(), timeout=2.0)
+                pcm_16k = _downsample_48k_stereo_to_16k_mono(chunk)
+                await session.send_realtime_input(
+                    audio=types.Blob(data=pcm_16k, mime_type="audio/pcm;rate=16000"),
+                )
+            except asyncio.TimeoutError:
+                continue
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.warning("GeminiLiveStreamer send error: %s", e)
+
+    async def _receiver(self, session) -> None:
+        parts: list[str] = []
+        try:
+            async for msg in session.receive():
+                sc = getattr(msg, "server_content", None)
+                if sc:
+                    it = getattr(sc, "input_transcription", None)
+                    if it:
+                        text = getattr(it, "text", "") or ""
+                        if text:
+                            parts.append(text)
+                    if getattr(sc, "turn_complete", False):
+                        transcript = "".join(parts).strip()
+                        parts = []
+                        if transcript and self._callback:
+                            try:
+                                await self._callback(transcript)
+                            except Exception as e:
+                                logger.warning("Live transcript callback error: %s", e)
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.warning("GeminiLiveStreamer receive error: %s", e)
 
 
 async def transcribe_audio_live(wav_path: str, model: Optional[str] = None) -> Dict[str, Any]:
