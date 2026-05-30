@@ -1,0 +1,55 @@
+name: ios-platform
+label: iOS App
+kind: platform
+version: 0.1.0
+description: >
+  iOS app gateway adapter for Kaveri. Bridges the existing Kaveri iOS
+  app (com.kaveri.cockpit) to the Hermes agent using the app's existing
+  Firebase transport contract — no app rewrite required.
+
+  Inbound: a Firestore on_snapshot listener on
+  users/{uid}/channels/{channel}/messages picks up role=user,
+  intent=interact docs and dispatches them as agent turns.
+
+  Outbound: the agent's reply is written back to the same Firestore
+  collection as a role=assistant, intent=interact doc, which the app's
+  realtime listener renders.
+
+  Live status: typing / thoughts ripple is mirrored to the Firebase
+  Realtime Database at channel_state/{channel}, exactly as the old
+  sangamam-v3 relay did.
+
+  Requires the firebase-admin SDK and a Firebase service-account JSON
+  (project kaveri-chat). Push (APNs) is handled separately by the
+  existing Supabase edge function on assistant-message insert.
+author: forge
+requires_env:
+  - name: IOS_FIREBASE_CREDENTIALS
+    description: "Path to the Firebase service-account JSON (project kaveri-chat)"
+    prompt: "Firebase service-account JSON path"
+    password: false
+  - name: IOS_FIREBASE_RTDB_URL
+    description: "Firebase Realtime Database URL (for typing/thoughts ripple)"
+    prompt: "Firebase RTDB URL (https://<project>-default-rtdb.firebaseio.com)"
+    password: false
+optional_env:
+  - name: IOS_UID
+    description: "Firebase user id whose channels are watched (default: subri)"
+    prompt: "Firebase UID"
+    password: false
+  - name: IOS_CHANNELS
+    description: "Comma-separated channel names to watch (default: cockpit)"
+    prompt: "Channels to watch"
+    password: false
+  - name: IOS_HOME_CHANNEL
+    description: "Default channel for cron / notification delivery (default: cockpit)"
+    prompt: "Home channel"
+    password: false
+  - name: IOS_ALLOWED_USERS
+    description: "Comma-separated Firebase UIDs allowed to send (default: IOS_UID)"
+    prompt: "Allowed user ids"
+    password: false
+  - name: IOS_ALLOW_ALL_USERS
+    description: "Allow any uid (dev only — disables allowlist)"
+    prompt: "Allow all users? (true/false)"
+    password: false
