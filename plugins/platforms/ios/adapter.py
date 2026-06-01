@@ -245,15 +245,18 @@ class IOSAdapter(BasePlatformAdapter):
                     continue
                 role = data.get("role")
                 intent = data.get("intent")
-                # Dispatch two kinds of inbound as agent turns (mirrors the old
+                # Dispatch three kinds of inbound as agent turns (mirrors the old
                 # sangamam watcher):
                 #   1. live user messages: role=user, intent=interact
                 #   2. notifications/escalations: intent=notify (any role; e.g. a
                 #      sibling profile's escalate writes role=system/intent=notify).
                 #      These are hidden in the iOS UI but still dispatched.
+                #   3. sibling agent responses: role=assistant, intent=interact
+                #      (replies to escalations from finance/logistics).
                 is_user_turn = role == "user" and intent == "interact"
                 is_notify = intent == "notify"
-                if not (is_user_turn or is_notify):
+                is_sibling_response = role == "assistant" and intent == "interact"
+                if not (is_user_turn or is_notify or is_sibling_response):
                     continue
                 # Flip typing on immediately (background thread) for snappy ripple.
                 self._rtdb_typing(channel, True)
