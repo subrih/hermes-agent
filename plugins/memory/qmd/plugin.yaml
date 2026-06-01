@@ -1,0 +1,3 @@
+name: qmd
+version: 0.1.0
+description: "QMD semantic memory — recalls facts from a local QMD-indexed markdown corpus via on-device embeddings (BM25 + vector + rerank). Pre-turn injection + explicit recall tool. Read/recall only; formation is handled by the memory-formation cron."
