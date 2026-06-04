@@ -166,12 +166,19 @@ export interface DesktopConnectionConfig {
   remoteTokenPreview: string | null
   remoteTokenSet: boolean
   remoteUrl: string
+  // [kaveri fork] Cloudflare Access service-token state (booleans/preview only)
+  cfAccessIdPreview: string | null
+  cfAccessIdSet: boolean
+  cfAccessSecretSet: boolean
 }
 
 export interface DesktopConnectionConfigInput {
   mode: 'local' | 'remote'
   remoteToken?: string
   remoteUrl?: string
+  // [kaveri fork] Cloudflare Access service-token creds (raw, write-only)
+  cfAccessId?: string
+  cfAccessSecret?: string
 }
 
 export interface DesktopConnectionTestResult {

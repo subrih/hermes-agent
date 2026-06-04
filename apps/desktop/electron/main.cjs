@@ -2089,6 +2089,7 @@ function fetchJson(url, token, options = {}) {
         headers: {
           'Content-Type': 'application/json',
           'X-Hermes-Session-Token': token,
+          ...cfAccessHeadersForUrl(url), // [kaveri fork] Cloudflare Access service token (REST)
           ...(body ? { 'Content-Length': String(body.length) } : {})
         }
       },
@@ -3169,11 +3170,18 @@ function writeDesktopConnectionConfig(config) {
 function sanitizeDesktopConnectionConfig(config = readDesktopConnectionConfig()) {
   const remoteToken = decryptDesktopSecret(config.remote?.token)
 
+  const cfAccessId = decryptDesktopSecret(config.remote?.cfAccessId) // [kaveri fork]
+  const cfAccessSecret = decryptDesktopSecret(config.remote?.cfAccessSecret) // [kaveri fork]
+
   return {
     mode: config.mode === 'remote' ? 'remote' : 'local',
     remoteUrl: String(config.remote?.url || ''),
     remoteTokenPreview: tokenPreview(remoteToken),
     remoteTokenSet: Boolean(remoteToken),
+    // [kaveri fork] Cloudflare Access service-token state (never expose raw values)
+    cfAccessIdPreview: tokenPreview(cfAccessId),
+    cfAccessIdSet: Boolean(cfAccessId),
+    cfAccessSecretSet: Boolean(cfAccessSecret),
     envOverride: Boolean(process.env.HERMES_DESKTOP_REMOTE_URL)
   }
 }
@@ -3184,13 +3192,24 @@ function coerceDesktopConnectionConfig(input = {}, existing = readDesktopConnect
   const remoteUrl = String(input.remoteUrl ?? existing.remote?.url ?? '').trim()
   const incomingToken = typeof input.remoteToken === 'string' ? input.remoteToken.trim() : ''
   const existingToken = existing.remote?.token
+  // [kaveri fork] Cloudflare Access service-token creds, stored like the session token
+  const incomingCfId = typeof input.cfAccessId === 'string' ? input.cfAccessId.trim() : ''
+  const incomingCfSecret = typeof input.cfAccessSecret === 'string' ? input.cfAccessSecret.trim() : ''
+  const keepSecret = (incoming, existingField) =>
+    incoming
+      ? persistToken
+        ? encryptDesktopSecret(incoming)
+        : { encoding: 'plain', value: incoming }
+      : existingField
   const nextRemote = {
     url: remoteUrl,
     token: incomingToken
       ? persistToken
         ? encryptDesktopSecret(incomingToken)
         : { encoding: 'plain', value: incomingToken }
-      : existingToken
+      : existingToken,
+    cfAccessId: keepSecret(incomingCfId, existing.remote?.cfAccessId),
+    cfAccessSecret: keepSecret(incomingCfSecret, existing.remote?.cfAccessSecret)
   }
 
   if (mode === 'remote') {
@@ -3254,6 +3273,83 @@ function resolveRemoteBackend() {
     wsUrl: buildGatewayWsUrl(baseUrl, token)
   }
 }
+
+// --- [kaveri fork] Cloudflare Access service-token support ---------------
+// The remote gateway (kav.hellopulse.ai) sits behind Cloudflare Access. A
+// service token authenticates non-interactive clients via two headers. We
+// inject them on requests whose host matches the configured remote host:
+//   - REST: added in fetchJson() (Node http/https, bypasses Chromium's stack)
+//   - WS:   added via session.defaultSession onBeforeSendHeaders (the chat
+//           WebSocket is a renderer browser WebSocket and can't set headers
+//           itself; this is the only place to reach its upgrade request)
+// Creds come from env (HERMES_DESKTOP_CF_ACCESS_ID/SECRET) or the saved
+// connection config (encrypted, same as the session token).
+function resolveCfAccessCreds() {
+  const envId = process.env.HERMES_DESKTOP_CF_ACCESS_ID
+  const envSecret = process.env.HERMES_DESKTOP_CF_ACCESS_SECRET
+
+  if (envId && envSecret) {
+    return { id: envId.trim(), secret: envSecret.trim() }
+  }
+
+  const config = readDesktopConnectionConfig()
+
+  return {
+    id: decryptDesktopSecret(config.remote?.cfAccessId),
+    secret: decryptDesktopSecret(config.remote?.cfAccessSecret)
+  }
+}
+
+function cfAccessScopedHost() {
+  const raw = process.env.HERMES_DESKTOP_REMOTE_URL || readDesktopConnectionConfig().remote?.url || ''
+
+  try {
+    return new URL(normalizeRemoteBaseUrl(raw)).host
+  } catch {
+    return ''
+  }
+}
+
+function cfAccessHeadersForUrl(targetUrl) {
+  const { id, secret } = resolveCfAccessCreds()
+
+  if (!id || !secret) {
+    return {}
+  }
+
+  const scopedHost = cfAccessScopedHost()
+
+  if (!scopedHost) {
+    return {}
+  }
+
+  let targetHost
+  try {
+    targetHost = new URL(targetUrl).host
+  } catch {
+    return {}
+  }
+
+  if (targetHost !== scopedHost) {
+    return {}
+  }
+
+  return { 'CF-Access-Client-Id': id, 'CF-Access-Client-Secret': secret }
+}
+
+function installRemoteAccessHeaders() {
+  session.defaultSession.webRequest.onBeforeSendHeaders((details, callback) => {
+    const extra = cfAccessHeadersForUrl(details.url)
+
+    if (extra['CF-Access-Client-Id']) {
+      details.requestHeaders['CF-Access-Client-Id'] = extra['CF-Access-Client-Id']
+      details.requestHeaders['CF-Access-Client-Secret'] = extra['CF-Access-Client-Secret']
+    }
+
+    callback({ requestHeaders: details.requestHeaders })
+  })
+}
+// --- end [kaveri fork] ---------------------------------------------------
 
 async function testDesktopConnectionConfig(input = {}) {
   const config = coerceDesktopConnectionConfig(input, readDesktopConnectionConfig(), { persistToken: false })
@@ -4229,6 +4325,7 @@ app.whenReady().then(() => {
     Menu.setApplicationMenu(null)
   }
   installMediaPermissions()
+  installRemoteAccessHeaders() // [kaveri fork] Cloudflare Access service-token headers (WS upgrade)
   registerMediaProtocol()
   ensureWslWindowsFonts()
   configureSpellChecker()

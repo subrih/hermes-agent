@@ -17,6 +17,10 @@ interface GatewaySettingsState {
   remoteTokenPreview: string | null
   remoteTokenSet: boolean
   remoteUrl: string
+  // [kaveri fork] Cloudflare Access service-token state
+  cfAccessIdPreview: string | null
+  cfAccessIdSet: boolean
+  cfAccessSecretSet: boolean
 }
 
 const EMPTY_STATE: GatewaySettingsState = {
@@ -24,7 +28,11 @@ const EMPTY_STATE: GatewaySettingsState = {
   mode: 'local',
   remoteTokenPreview: null,
   remoteTokenSet: false,
-  remoteUrl: ''
+  remoteUrl: '',
+  // [kaveri fork]
+  cfAccessIdPreview: null,
+  cfAccessIdSet: false,
+  cfAccessSecretSet: false
 }
 
 function ModeCard({
@@ -73,6 +81,9 @@ export function GatewaySettings() {
   const [testing, setTesting] = useState(false)
   const [state, setState] = useState<GatewaySettingsState>(EMPTY_STATE)
   const [remoteToken, setRemoteToken] = useState('')
+  // [kaveri fork] Cloudflare Access service-token inputs (write-only)
+  const [cfAccessId, setCfAccessId] = useState('')
+  const [cfAccessSecret, setCfAccessSecret] = useState('')
   const [lastTest, setLastTest] = useState<null | string>(null)
 
   useEffect(() => {
@@ -112,7 +123,10 @@ export function GatewaySettings() {
   const payload = () => ({
     mode: state.mode,
     remoteToken: remoteToken.trim() || undefined,
-    remoteUrl: state.remoteUrl.trim()
+    remoteUrl: state.remoteUrl.trim(),
+    // [kaveri fork] Cloudflare Access service-token creds (blank keeps saved)
+    cfAccessId: cfAccessId.trim() || undefined,
+    cfAccessSecret: cfAccessSecret.trim() || undefined
   })
 
   const save = async (apply: boolean) => {
@@ -135,6 +149,8 @@ export function GatewaySettings() {
 
       setState(next)
       setRemoteToken('')
+      setCfAccessId('') // [kaveri fork]
+      setCfAccessSecret('') // [kaveri fork]
       notify({
         kind: 'success',
         title: apply ? 'Gateway connection restarting' : 'Gateway settings saved',
@@ -165,7 +181,10 @@ export function GatewaySettings() {
       const result = await window.hermesDesktop.testConnectionConfig({
         mode: 'remote',
         remoteToken: remoteToken.trim() || undefined,
-        remoteUrl: state.remoteUrl.trim()
+        remoteUrl: state.remoteUrl.trim(),
+        // [kaveri fork] include Access creds so the test request clears Cloudflare Access
+        cfAccessId: cfAccessId.trim() || undefined,
+        cfAccessSecret: cfAccessSecret.trim() || undefined
       })
 
       const message = `Connected to ${result.baseUrl}${result.version ? ` · Hermes ${result.version}` : ''}`
@@ -267,6 +286,39 @@ export function GatewaySettings() {
           }
           description="The dashboard session token used for REST and WebSocket access. Leave blank to keep the saved token."
           title="Session token"
+        />
+        {/* [kaveri fork] Cloudflare Access service-token creds — injected on requests
+            to the remote host so the desktop app can pass Cloudflare Access. */}
+        <ListRow
+          action={
+            <Input
+              autoComplete="off"
+              className={cn('h-8 font-mono', CONTROL_TEXT)}
+              disabled={state.envOverride}
+              onChange={event => setCfAccessId(event.target.value)}
+              placeholder={
+                state.cfAccessIdSet ? `Existing ID ${state.cfAccessIdPreview ?? 'saved'}` : 'CF-Access-Client-Id'
+              }
+              value={cfAccessId}
+            />
+          }
+          description="Cloudflare Access service-token Client ID (when the backend sits behind Cloudflare Access). Leave blank to keep the saved value."
+          title="Access Client ID"
+        />
+        <ListRow
+          action={
+            <Input
+              autoComplete="off"
+              className={cn('h-8 font-mono', CONTROL_TEXT)}
+              disabled={state.envOverride}
+              onChange={event => setCfAccessSecret(event.target.value)}
+              placeholder={state.cfAccessSecretSet ? 'Existing secret saved' : 'CF-Access-Client-Secret'}
+              type="password"
+              value={cfAccessSecret}
+            />
+          }
+          description="Cloudflare Access service-token Client Secret. Leave blank to keep the saved value."
+          title="Access Client Secret"
         />
       </div>
 
