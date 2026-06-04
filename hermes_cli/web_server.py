@@ -135,6 +135,18 @@ app = FastAPI(title="Hermes Agent", version=__version__, lifespan=_lifespan)
 _SESSION_TOKEN = os.environ.get("HERMES_DASHBOARD_SESSION_TOKEN") or secrets.token_urlsafe(32)
 _SESSION_HEADER_NAME = "X-Hermes-Session-Token"
 
+# [kaveri fork] Extra hostnames to accept in the Host/DNS-rebinding guard and
+# the WS Origin guard. Needed when a public hostname fronts the loopback-bound
+# dashboard via a tunnel (e.g. kav.hellopulse.ai behind Cloudflare Access): the
+# tunnel rewrites Host -> localhost so REST passes, but a browser still sends
+# Origin: https://kav.hellopulse.ai, which the WS Origin guard otherwise 403s.
+# Comma-separated; matched case-insensitively against the host (no port/scheme).
+_EXTRA_ACCEPTED_HOSTS = frozenset(
+    h.strip().lower()
+    for h in os.environ.get("HERMES_DASHBOARD_ALLOWED_HOSTS", "").split(",")
+    if h.strip()
+)
+
 # In-browser Chat tab (/chat, /api/pty, /api/ws, …).  Always enabled: the
 # desktop app and the dashboard's own Chat tab both drive the agent over the
 # `/api/ws` + `/api/pty` WebSockets, so the embedded-chat surface is an
@@ -258,6 +270,12 @@ def _is_accepted_host(host_header: str, bound_host: str) -> bool:
     else:
         host_only = h.rsplit(":", 1)[0] if ":" in h else h
     host_only = host_only.lower()
+
+    # [kaveri fork] explicit operator allowlist for a public hostname fronting
+    # the dashboard via a tunnel (covers both the HTTP Host guard and the WS
+    # Origin guard, since both route through this helper).
+    if host_only in _EXTRA_ACCEPTED_HOSTS:
+        return True
 
     # 0.0.0.0 bind means operator explicitly opted into all-interfaces
     # (requires --insecure per web_server.start_server). No Host-layer
