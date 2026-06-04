@@ -1,8 +1,9 @@
 import { useStore } from '@nanostores/react'
 import { useEffect, useState } from 'react'
 
+import { GatewaySettings } from '@/app/settings/gateway-settings'
 import { Button } from '@/components/ui/button'
-import { AlertTriangle, FileText, Loader2, RefreshCw, Wrench } from '@/lib/icons'
+import { AlertTriangle, FileText, Loader2, RefreshCw, Settings, Wrench } from '@/lib/icons'
 import { $desktopBoot } from '@/store/boot'
 import { $desktopOnboarding } from '@/store/onboarding'
 
@@ -18,6 +19,9 @@ export function BootFailureOverlay() {
   const [busy, setBusy] = useState<BusyAction>(null)
   const [logs, setLogs] = useState<string[]>([])
   const [showLogs, setShowLogs] = useState(false)
+  // [kaveri fork] let the user fix remote gateway creds without a working boot
+  // (otherwise a bad/stale remote token traps the app here with no way to Settings).
+  const [showSettings, setShowSettings] = useState(false)
 
   const visible = Boolean(boot.error) && !boot.running
   // While first-run onboarding owns the picker/flow we let it surface its own
@@ -38,6 +42,29 @@ export function BootFailureOverlay() {
 
   if (!visible || suppressed) {
     return null
+  }
+
+  // [kaveri fork] Embedded Gateway settings — GatewaySettings talks to the main
+  // process over IPC, so it works even while the gateway is down. Lets the user
+  // repoint the remote URL / token / Access creds and reconnect (Save and
+  // reconnect reloads the window) without hand-editing connection.json.
+  if (showSettings) {
+    return (
+      <div className="fixed inset-0 z-[1400] flex items-center justify-center bg-(--ui-chat-surface-background) p-6">
+        <div className="flex max-h-[85vh] w-full max-w-[48rem] flex-col overflow-hidden rounded-xl border border-(--ui-stroke-secondary) bg-(--ui-chat-bubble-background) shadow-sm">
+          <div className="flex items-center gap-2 border-b border-(--ui-stroke-tertiary) px-5 py-3">
+            <Settings className="size-4 text-muted-foreground" />
+            <h2 className="text-[0.9375rem] font-semibold tracking-tight">Gateway settings</h2>
+            <Button className="ml-auto" onClick={() => setShowSettings(false)} variant="ghost">
+              Back
+            </Button>
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            <GatewaySettings />
+          </div>
+        </div>
+      </div>
+    )
   }
 
   const retry = async () => {
@@ -95,6 +122,11 @@ export function BootFailureOverlay() {
               <Button disabled={Boolean(busy)} onClick={() => void switchToLocalGateway()} variant="outline">
                 {busy === 'local' ? <Loader2 className="size-4 animate-spin" /> : null}
                 Use local gateway
+              </Button>
+              {/* [kaveri fork] fix remote gateway creds in place, no working boot needed */}
+              <Button disabled={Boolean(busy)} onClick={() => setShowSettings(true)} variant="outline">
+                <Settings className="size-4" />
+                Gateway settings
               </Button>
               <Button onClick={openLogs} variant="ghost">
                 <FileText className="size-4" />
