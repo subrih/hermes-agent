@@ -50,8 +50,16 @@
     height: 100% !important;
     max-height: 100% !important;
     box-sizing: border-box;
-    padding-top: env(safe-area-inset-top);
+    /* env(safe-area-inset-top) reports 0 until iOS does its first layout pass
+     * (a keyboard show triggers it), which left the header under the status bar
+     * on fresh open. Floor it so the header always clears the status bar; once
+     * env() populates, max() keeps the true inset (no shift on notched devices). */
+    padding-top: max(env(safe-area-inset-top), 59px);
     padding-bottom: env(safe-area-inset-bottom);
+    /* The titlebar control clusters are position:fixed (viewport-anchored), so
+     * the shell padding can't move them — push their --titlebar-controls-top
+     * (inline 6px) below the status bar. !important beats the inline value. */
+    --titlebar-controls-top: calc(max(env(safe-area-inset-top), 59px) + 6px) !important;
   }
 
   /* Drawer backdrop: dims + captures taps to close, but ONLY over the exposed
