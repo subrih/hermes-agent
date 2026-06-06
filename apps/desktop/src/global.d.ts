@@ -226,6 +226,14 @@ export interface DesktopConnectionConfig {
   remoteTokenPreview: string | null
   remoteTokenSet: boolean
   remoteUrl: string
+  // [kaveri fork] iOS only: Cloudflare Access service-token credentials sent as
+  // CF-Access-Client-Id/Secret on REST + WS (the native client can set headers;
+  // the phone has no sidecar). cfAccessSupported gates the settings UI fields —
+  // the Electron bridge omits these so they never render on desktop.
+  cfAccessSupported?: boolean
+  cfAccessId?: string
+  cfAccessSecretSet?: boolean
+  cfAccessSecretPreview?: string | null
 }
 
 export interface DesktopConnectionConfigInput {
@@ -236,6 +244,10 @@ export interface DesktopConnectionConfigInput {
   remoteAuthMode?: 'oauth' | 'token'
   remoteToken?: string
   remoteUrl?: string
+  // [kaveri fork] iOS only — Cloudflare Access service token. cfAccessId is the
+  // (non-secret) client id; cfAccessSecret is write-only (omit to keep saved).
+  cfAccessId?: string
+  cfAccessSecret?: string
 }
 
 export interface DesktopConnectionTestResult {

@@ -25,6 +25,12 @@ interface GatewaySettingsState {
   remoteTokenPreview: string | null
   remoteTokenSet: boolean
   remoteUrl: string
+  // [kaveri fork] iOS only — Cloudflare Access service token (gated by
+  // cfAccessSupported, which the Electron bridge omits).
+  cfAccessSupported?: boolean
+  cfAccessId?: string
+  cfAccessSecretSet?: boolean
+  cfAccessSecretPreview?: string | null
 }
 
 const EMPTY_STATE: GatewaySettingsState = {
@@ -103,6 +109,8 @@ export function GatewaySettings() {
   const [signingIn, setSigningIn] = useState(false)
   const [state, setState] = useState<GatewaySettingsState>(EMPTY_STATE)
   const [remoteToken, setRemoteToken] = useState('')
+  // [kaveri fork] CF Access service-token secret (write-only, like remoteToken).
+  const [cfAccessSecret, setCfAccessSecret] = useState('')
   const [lastTest, setLastTest] = useState<null | string>(null)
 
   // Connection scope: null = the global/default connection (the original
@@ -136,6 +144,7 @@ export function GatewaySettings() {
     // Clear scope-local entry state so a token from one scope can't leak into
     // the next when switching profiles.
     setRemoteToken('')
+    setCfAccessSecret('')
     setLastTest(null)
 
     desktop
@@ -284,7 +293,11 @@ export function GatewaySettings() {
     profile: scope ?? undefined,
     remoteAuthMode: authMode,
     remoteToken: authMode === 'token' ? remoteToken.trim() || undefined : undefined,
-    remoteUrl: trimmedUrl
+    remoteUrl: trimmedUrl,
+    // [kaveri fork] iOS only — send CF Access creds when the bridge supports them.
+    ...(state.cfAccessSupported
+      ? { cfAccessId: (state.cfAccessId ?? '').trim(), cfAccessSecret: cfAccessSecret.trim() || undefined }
+      : {})
   })
 
   const save = async (apply: boolean) => {
@@ -310,6 +323,7 @@ export function GatewaySettings() {
 
       setState(next)
       setRemoteToken('')
+      setCfAccessSecret('')
       notify({
         kind: 'success',
         title: apply ? g.restartingTitle : g.savedTitle,
@@ -578,6 +592,45 @@ export function GatewaySettings() {
             description={g.tokenDesc}
             title={g.tokenTitle}
           />
+        ) : null}
+
+        {/* [kaveri fork] iOS only: Cloudflare Access service token. The native
+            client sets CF-Access-Client-Id/Secret on REST + WS (no sidecar on
+            the phone). Hidden on desktop (bridge omits cfAccessSupported). */}
+        {state.cfAccessSupported && state.mode === 'remote' ? (
+          <>
+            <ListRow
+              action={
+                <Input
+                  autoComplete="off"
+                  className={cn('h-8 font-mono', CONTROL_TEXT)}
+                  onChange={event => setState(current => ({ ...current, cfAccessId: event.target.value }))}
+                  placeholder="xxxx.access"
+                  value={state.cfAccessId ?? ''}
+                />
+              }
+              description="Cloudflare Access service-token client ID. Sent as CF-Access-Client-Id on every request."
+              title="CF Access client ID"
+            />
+            <ListRow
+              action={
+                <Input
+                  autoComplete="off"
+                  className={cn('h-8 font-mono', CONTROL_TEXT)}
+                  onChange={event => setCfAccessSecret(event.target.value)}
+                  placeholder={
+                    state.cfAccessSecretSet
+                      ? `Existing secret ${state.cfAccessSecretPreview ?? 'saved'}`
+                      : 'Paste client secret'
+                  }
+                  type="password"
+                  value={cfAccessSecret}
+                />
+              }
+              description="Cloudflare Access service-token client secret. Leave blank to keep the saved secret."
+              title="CF Access client secret"
+            />
+          </>
         ) : null}
       </div>
 

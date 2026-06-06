@@ -49,6 +49,27 @@ async function saveConfig(next: StoredConfig): Promise<void> {
   await Preferences.set({ key: CONFIG_KEY, value: JSON.stringify(next) })
 }
 
+// Merge a settings-UI payload onto the stored config. Token + CF secret are
+// write-only: a blank value keeps the saved one (so re-saving the form without
+// re-typing secrets doesn't wipe them). cfAccessId is non-secret → always set.
+async function persistConfigInput(p: {
+  mode?: 'local' | 'remote'
+  remoteUrl?: string
+  remoteToken?: string
+  cfAccessId?: string
+  cfAccessSecret?: string
+}): Promise<void> {
+  const c = await loadConfig()
+  await saveConfig({
+    ...c,
+    mode: p.mode ?? c.mode,
+    remoteUrl: p.remoteUrl ?? c.remoteUrl,
+    token: p.remoteToken || c.token,
+    cfAccessId: p.cfAccessId ?? c.cfAccessId,
+    cfAccessSecret: p.cfAccessSecret || c.cfAccessSecret
+  })
+}
+
 function cfHeaders(cfg: StoredConfig): Record<string, string> {
   if (cfg.cfAccessId && cfg.cfAccessSecret) {
     return {
@@ -222,17 +243,20 @@ function buildBridge() {
         remoteOauthConnected: false,
         remoteTokenPreview: c.token ? `...${c.token.slice(-6)}` : null,
         remoteTokenSet: Boolean(c.token),
-        remoteUrl: c.remoteUrl
+        remoteUrl: c.remoteUrl,
+        // [kaveri fork] CF Access fields — drive the iOS-only settings inputs.
+        cfAccessSupported: true,
+        cfAccessId: c.cfAccessId ?? '',
+        cfAccessSecretSet: Boolean(c.cfAccessSecret),
+        cfAccessSecretPreview: c.cfAccessSecret ? `...${c.cfAccessSecret.slice(-6)}` : null
       }
     },
     saveConnectionConfig: async (p: any) => {
-      const c = await loadConfig()
-      await saveConfig({ ...c, mode: p.mode ?? c.mode, remoteUrl: p.remoteUrl ?? c.remoteUrl, token: p.remoteToken || c.token })
+      await persistConfigInput(p)
       return (await (window as any).hermesDesktop.getConnectionConfig())
     },
     applyConnectionConfig: async (p: any) => {
-      const c = await loadConfig()
-      await saveConfig({ ...c, mode: p.mode ?? c.mode, remoteUrl: p.remoteUrl ?? c.remoteUrl, token: p.remoteToken || c.token })
+      await persistConfigInput(p)
       setTimeout(() => window.location.reload(), 150)
       return (await (window as any).hermesDesktop.getConnectionConfig())
     },
@@ -326,6 +350,12 @@ export async function initIosBridge(): Promise<void> {
     const cfg = cachedConfig ?? { mode: 'remote', remoteUrl: '', token: '' }
     return new NativeWebSocket(url, cfHeaders(cfg)) as unknown as WebSocket
   }
+  // [kaveri fork] One-time migration: if nothing is stored yet, persist the
+  // resolved config (the baked default) into Preferences. This lets a later
+  // bundle drop the baked secrets without stranding an already-installed device
+  // — its creds now live on-device, not only in the shipped bundle.
+  const stored = await Preferences.get({ key: CONFIG_KEY })
   await loadConfig()
+  if (!stored.value && cachedConfig) await saveConfig(cachedConfig)
   ;(window as any).hermesDesktop = buildBridge()
 }
