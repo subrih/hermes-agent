@@ -18,28 +18,13 @@
     --chat-min-width: 0rem;
   }
 
-  /* Anchor the app shell to the visual-viewport box (height + top offset, both
-   * set by mobile-ui.ts). Fixing it to the viewport means the composer always
-   * rides above the keyboard and snaps back exactly when the keyboard hides —
-   * the page can't be left scrolled with the composer pushed off-screen. */
-  [data-platform='ios'] [data-slot='sidebar-wrapper'] {
-    position: fixed !important;
-    left: 0;
-    right: 0;
-    top: var(--vv-top, 0px);
-    height: var(--app-height, 100dvh) !important;
-  }
-
-  /* Lock the document so iOS can't scroll/rubber-band the whole page when an
-   * input is focused. The shell is fixed to the viewport above; all real
-   * scrolling happens inside the app's own panes. */
-  [data-platform='ios'] {
-    height: 100%;
-    overflow: hidden;
-  }
+  /* Keyboard handling is native (capacitor.config Keyboard.resize='native'):
+   * the WKWebView frame shrinks when the keyboard shows, so the normal-flow
+   * shell (full height) tracks it and the composer stays above the keyboard.
+   * We only lock the document so it can't rubber-band; the panes scroll. */
+  [data-platform='ios'],
   [data-platform='ios'] body {
-    position: fixed;
-    inset: 0;
+    height: 100%;
     overflow: hidden;
     overscroll-behavior: none;
   }

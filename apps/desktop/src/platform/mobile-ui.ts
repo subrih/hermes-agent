@@ -70,32 +70,7 @@ export function initMobileUi(): void {
 
   installDrawerBackdrop()
   suppressLaunchAutofocus()
-
-  // Anchor the app shell to the visual viewport box so the composer always rides
-  // above the on-screen keyboard and snaps back when it hides. The shell is
-  // position:fixed in mobile-ios.css; we feed it the viewport's height AND top
-  // offset. Tracking offsetTop (not just height) is what fixes the "composer
-  // climbs upstairs after dismissing the keyboard" bug — on a device the visual
-  // viewport can be shifted, not only shrunk, and height alone misses that.
-  const vv = window.visualViewport
-  if (vv) {
-    const root = document.documentElement.style
-    let lastH = -1
-    let lastT = -1
-    const sync = () => {
-      const h = Math.round(vv.height)
-      const t = Math.round(vv.offsetTop)
-      // Only write when the box actually changed — writing unconditionally on the
-      // viewport 'scroll' event (and NOT calling scrollTo, which re-fired it) is
-      // what caused the fast screen-shiver feedback loop.
-      if (h === lastH && t === lastT) return
-      lastH = h
-      lastT = t
-      root.setProperty('--app-height', `${h}px`)
-      root.setProperty('--vv-top', `${t}px`)
-    }
-    sync()
-    vv.addEventListener('resize', sync)
-    vv.addEventListener('scroll', sync)
-  }
+  // Keyboard handling is native now (capacitor.config Keyboard.resize='native'):
+  // the WKWebView resizes itself, so the layout tracks the keyboard with no
+  // web-side viewport math.
 }

@@ -11,6 +11,7 @@
   "dependencies": {
     "@capacitor/core": "^8.4.0",
     "@capacitor/ios": "^8.4.0",
+    "@capacitor/keyboard": "^8.0.3",
     "@capacitor/preferences": "^8.0.0",
     "@capgo/capacitor-updater": "^8.47.9"
   },

@@ -18,6 +18,13 @@ const config: CapacitorConfig = {
     // plugin doesn't phone Capgo's cloud. See src/platform/live-update.ts.
     CapacitorUpdater: {
       autoUpdate: false
+    },
+    // [kaveri fork] Native keyboard resize: the WKWebView frame itself shrinks
+    // when the keyboard appears, so the layout (100vh) tracks it and the
+    // composer stays above the keyboard — no web-side viewport hacks, no
+    // scroll-to-focus glitches.
+    Keyboard: {
+      resize: 'native'
     }
   }
 }
