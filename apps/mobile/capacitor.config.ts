@@ -6,7 +6,7 @@ import type { CapacitorConfig } from '@capacitor/cli'
 // (window.hermesDesktop shim) is part of that bundle and self-activates under
 // Capacitor; native HTTP/WS + CF Access headers are provided by Capacitor.
 const config: CapacitorConfig = {
-  appId: 'ai.kaveri.hermes',
+  appId: 'com.kaveri.cockpit',
   appName: 'Kaveri',
   webDir: '../desktop/dist',
   ios: {

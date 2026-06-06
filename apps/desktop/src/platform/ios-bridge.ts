@@ -26,12 +26,21 @@ interface StoredConfig {
 
 let cachedConfig: StoredConfig | null = null
 
+// [kaveri fork] First-run default so the device build connects out of the box.
+// TODO(phase2): move these to on-device entry stored in the iOS Keychain
+// instead of baking them into the binary (this IPA is personal/ad-hoc only).
+const DEFAULT_CONFIG: StoredConfig = {
+  mode: 'remote',
+  remoteUrl: 'https://kav.hellopulse.ai',
+  token: 'Z2JcYvCjnThi-mC4hWfG_XtAZggsZq1UapUGT9p9HOs',
+  cfAccessId: '857150541c167b0a4edeccd94391515b.access',
+  cfAccessSecret: 'c473ae93ab91296463af1326433f3cf70a6fa79c53c1e11a60b8f507c9651cc2'
+}
+
 async function loadConfig(): Promise<StoredConfig> {
   if (cachedConfig) return cachedConfig
   const { value } = await Preferences.get({ key: CONFIG_KEY })
-  cachedConfig = value
-    ? (JSON.parse(value) as StoredConfig)
-    : { mode: 'local', remoteUrl: '', token: '' }
+  cachedConfig = value ? (JSON.parse(value) as StoredConfig) : { ...DEFAULT_CONFIG }
   return cachedConfig
 }
 
