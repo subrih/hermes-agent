@@ -8,6 +8,7 @@ import { Capacitor } from '@capacitor/core'
 
 import { $sidebarOpen, FILE_BROWSER_PANE_ID, setSidebarOpen } from '@/store/layout'
 import { setPaneOpen } from '@/store/panes'
+import { $activeGatewayProfile } from '@/store/profile'
 import { $selectedStoredSessionId } from '@/store/session'
 
 function isNative(): boolean {
@@ -66,6 +67,19 @@ export function initMobileUi(): void {
   $selectedStoredSessionId.subscribe(id => {
     if (id && id !== prev) setSidebarOpen(false)
     prev = id
+  })
+
+  // Switching profile from the drawer KEEPS the drawer open showing the new
+  // profile's sessions (so the switch is visible + you can pick one), instead of
+  // closing and dumping you back into the previous chat. selectProfile also
+  // starts a fresh session in that profile behind the drawer. Gated past the
+  // boot window so the initial profile-restore doesn't pop the drawer on launch.
+  let bootSettled = false
+  window.setTimeout(() => { bootSettled = true }, 5000)
+  let prevProfile = $activeGatewayProfile.get()
+  $activeGatewayProfile.subscribe(profile => {
+    if (profile !== prevProfile && bootSettled) setSidebarOpen(true)
+    prevProfile = profile
   })
 
   installDrawerBackdrop()
