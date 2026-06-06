@@ -112,18 +112,14 @@
     transform: translateX(0);
   }
 
-  /* Right-side panes (preview, file browser) → full-screen overlays when open,
-   * removed from layout when closed. */
+  /* Desktop-only right panes — NEVER render on iOS, regardless of persisted
+   * open-state. The file browser's folder tree is unsupported on the phone
+   * (shows "UNREADABLE") and preview/terminal aren't phone surfaces. Hiding the
+   * titlebar toggle (titlebar-controls.tsx) stops new opens; this hides one that
+   * was already left open. */
   [data-platform='ios'] [data-pane-id='preview'],
   [data-platform='ios'] [data-pane-id='file-browser'] {
-    position: fixed;
-    inset: 0;
-    z-index: 60;
-    width: 100vw !important;
-  }
-  [data-platform='ios'] [data-pane-id='preview'][data-pane-open='false'],
-  [data-platform='ios'] [data-pane-id='file-browser'][data-pane-open='false'] {
-    display: none;
+    display: none !important;
   }
 
   /* The sidebar drawer is position:fixed (ignores the shell's safe-area padding),
