@@ -2338,6 +2338,7 @@ function fetchJson(url, token, options = {}) {
         headers: {
           'Content-Type': 'application/json',
           'X-Hermes-Session-Token': token,
+          ...cfAccessHeadersForUrl(url), // [kaveri fork] Cloudflare Access service token (REST)
           ...(body ? { 'Content-Length': String(body.length) } : {})
         }
       },
@@ -3875,6 +3876,18 @@ async function sanitizeDesktopConnectionConfig(config = readDesktopConnectionCon
     remoteUrl,
     remoteTokenPreview: tokenPreview(remoteToken),
     remoteTokenSet: Boolean(remoteToken),
+    // [kaveri fork] Cloudflare Access service token. CF creds are GLOBAL (the
+    // backend host is the same for every profile), so they're read from the
+    // global remote block regardless of scope. Mirrors the iOS bridge contract
+    // so the shared Gateway settings fields render + save on Mac too. The id is
+    // non-secret (shown editable); the secret is write-only (preview + set flag).
+    cfAccessSupported: true,
+    cfAccessId: String(config.remote?.cfAccessId || ''),
+    cfAccessSecretSet: Boolean(decryptDesktopSecret(config.remote?.cfAccessSecret)),
+    cfAccessSecretPreview: (() => {
+      const s = decryptDesktopSecret(config.remote?.cfAccessSecret)
+      return s ? tokenPreview(s) : null
+    })(),
     // The env override only forces the global/primary connection; a per-profile
     // scope is never overridden by HERMES_DESKTOP_REMOTE_URL.
     envOverride: key ? false : Boolean(process.env.HERMES_DESKTOP_REMOTE_URL)
@@ -3889,6 +3902,29 @@ function buildRemoteBlock(remoteUrl, authMode, token) {
     throw new Error('Remote gateway session token is required.')
   }
   return { url: normalizeRemoteBaseUrl(remoteUrl), authMode, token }
+}
+
+// [kaveri fork] Merge CF Access creds into a remote block. CF is GLOBAL (same
+// backend host for every profile), so it always lives on the global remote
+// block — even when a per-profile scope is being saved. The id is non-secret
+// (stored plain, shown editable); the secret is encrypted like the session
+// token. Blank inputs keep the saved values (write-only secret semantics).
+function mergeCfAccess(remoteBlock, input, existing, persistToken) {
+  const out = { ...remoteBlock }
+  if (typeof input.cfAccessId === 'string') {
+    out.cfAccessId = input.cfAccessId.trim()
+  } else if (existing.remote?.cfAccessId != null) {
+    out.cfAccessId = existing.remote.cfAccessId
+  }
+  const incomingSecret = typeof input.cfAccessSecret === 'string' ? input.cfAccessSecret.trim() : ''
+  if (incomingSecret) {
+    out.cfAccessSecret = persistToken
+      ? encryptDesktopSecret(incomingSecret)
+      : { encoding: 'plain', value: incomingSecret }
+  } else if (existing.remote?.cfAccessSecret) {
+    out.cfAccessSecret = existing.remote.cfAccessSecret
+  }
+  return out
 }
 
 function coerceDesktopConnectionConfig(input = {}, existing = readDesktopConnectionConfig(), options = {}) {
@@ -3917,7 +3953,11 @@ function coerceDesktopConnectionConfig(input = {}, existing = readDesktopConnect
     } else {
       delete profiles[key]
     }
-    return { mode: existing.mode === 'remote' ? 'remote' : 'local', remote: existing.remote || {}, profiles }
+    return {
+      mode: existing.mode === 'remote' ? 'remote' : 'local',
+      remote: mergeCfAccess(existing.remote || {}, input, existing, persistToken), // [kaveri fork]
+      profiles
+    }
   }
 
   const nextRemote =
@@ -3926,7 +3966,8 @@ function coerceDesktopConnectionConfig(input = {}, existing = readDesktopConnect
       : { url: remoteUrl ? normalizeRemoteBaseUrl(remoteUrl) : remoteUrl, authMode, token: nextToken }
 
   // Preserve per-profile overrides when saving the global connection.
-  return { mode, remote: nextRemote, profiles: existing.profiles || {} }
+  // [kaveri fork] Carry the global CF Access creds onto the remote block.
+  return { mode, remote: mergeCfAccess(nextRemote, input, existing, persistToken), profiles: existing.profiles || {} }
 }
 
 // Build a remote backend connection descriptor from an already-resolved remote
@@ -3934,6 +3975,73 @@ function coerceDesktopConnectionConfig(input = {}, existing = readDesktopConnect
 // and is shared by the per-profile, env, and global resolution paths. `token`
 // is the DECRYPTED static token (or null in OAuth mode). `source` is a label
 // for diagnostics ('profile' | 'env' | 'settings').
+// --- [kaveri fork] Cloudflare Access service-token support -----------------
+// The remote gateway (kav.hellopulse.ai) sits behind Cloudflare Access. A
+// service token authenticates non-interactive clients via two headers, injected
+// on requests whose host matches the configured remote host:
+//   - REST: added in fetchJson() (Node http/https, bypasses Chromium's stack)
+//   - WS:   added via session.defaultSession onBeforeSendHeaders (the chat
+//           WebSocket is a renderer browser WebSocket and can't set headers
+//           itself; this is the only place to reach its upgrade request)
+// Creds come from env (HERMES_DESKTOP_CF_ACCESS_ID/SECRET) or the saved
+// connection config (id stored plain — non-secret; secret encrypted like the
+// session token). This replaces the external cf-sidecar: the app now reaches
+// CF-Access-gated backends on its own, matching the iOS bridge.
+function resolveCfAccessCreds() {
+  const envId = process.env.HERMES_DESKTOP_CF_ACCESS_ID
+  const envSecret = process.env.HERMES_DESKTOP_CF_ACCESS_SECRET
+  if (envId && envSecret) {
+    return { id: envId.trim(), secret: envSecret.trim() }
+  }
+  const config = readDesktopConnectionConfig()
+  return {
+    id: String(config.remote?.cfAccessId || ''),
+    secret: decryptDesktopSecret(config.remote?.cfAccessSecret)
+  }
+}
+
+function cfAccessScopedHost() {
+  const raw = process.env.HERMES_DESKTOP_REMOTE_URL || readDesktopConnectionConfig().remote?.url || ''
+  try {
+    return new URL(normalizeRemoteBaseUrl(raw)).host
+  } catch {
+    return ''
+  }
+}
+
+function cfAccessHeadersForUrl(targetUrl) {
+  const { id, secret } = resolveCfAccessCreds()
+  if (!id || !secret) {
+    return {}
+  }
+  const scopedHost = cfAccessScopedHost()
+  if (!scopedHost) {
+    return {}
+  }
+  let targetHost
+  try {
+    targetHost = new URL(targetUrl).host
+  } catch {
+    return {}
+  }
+  if (targetHost !== scopedHost) {
+    return {}
+  }
+  return { 'CF-Access-Client-Id': id, 'CF-Access-Client-Secret': secret }
+}
+
+function installRemoteAccessHeaders() {
+  session.defaultSession.webRequest.onBeforeSendHeaders((details, callback) => {
+    const extra = cfAccessHeadersForUrl(details.url)
+    if (extra['CF-Access-Client-Id']) {
+      details.requestHeaders['CF-Access-Client-Id'] = extra['CF-Access-Client-Id']
+      details.requestHeaders['CF-Access-Client-Secret'] = extra['CF-Access-Client-Secret']
+    }
+    callback({ requestHeaders: details.requestHeaders })
+  })
+}
+// --- end [kaveri fork] -----------------------------------------------------
+
 async function buildRemoteConnection(rawUrl, authMode, token, source) {
   const baseUrl = normalizeRemoteBaseUrl(rawUrl)
 
@@ -5711,6 +5819,7 @@ app.whenReady().then(() => {
     Menu.setApplicationMenu(null)
   }
   installMediaPermissions()
+  installRemoteAccessHeaders() // [kaveri fork] Cloudflare Access service-token headers (WS upgrade)
   registerMediaProtocol()
   ensureWslWindowsFonts()
   configureSpellChecker()
