@@ -55,6 +55,16 @@ function suppressLaunchAutofocus(): void {
 export function initMobileUi(): void {
   if (!isNative()) return
 
+  // Prevent iOS's auto-zoom when focusing an input whose font-size is < 16px —
+  // it widens the page past the viewport (a horizontal scroll that appears with
+  // the keyboard and clears when it hides). maximum-scale=1 disables it.
+  document
+    .querySelector('meta[name="viewport"]')
+    ?.setAttribute(
+      'content',
+      'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover'
+    )
+
   // Start on the chat with every side pane closed (the mobile expectation —
   // desktop persists pane state, but a phone should open to the conversation).
   setSidebarOpen(false)
