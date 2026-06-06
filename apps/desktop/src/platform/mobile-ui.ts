@@ -6,7 +6,7 @@
 
 import { Capacitor } from '@capacitor/core'
 
-import { FILE_BROWSER_PANE_ID, setSidebarOpen } from '@/store/layout'
+import { $sidebarOpen, FILE_BROWSER_PANE_ID, setSidebarOpen } from '@/store/layout'
 import { setPaneOpen } from '@/store/panes'
 import { $selectedStoredSessionId } from '@/store/session'
 
@@ -16,6 +16,40 @@ function isNative(): boolean {
   } catch {
     return false
   }
+}
+
+// Tap-to-dismiss backdrop behind the sidebar drawer. Created lazily, toggled by
+// the $sidebarOpen store; styled in mobile-ios.css (#mobile-drawer-backdrop).
+function installDrawerBackdrop(): void {
+  const el = document.createElement('div')
+  el.id = 'mobile-drawer-backdrop'
+  el.addEventListener('click', () => setSidebarOpen(false))
+  document.body.appendChild(el)
+  $sidebarOpen.subscribe(open => {
+    el.classList.toggle('is-open', open)
+  })
+}
+
+// Suppress the composer's launch autofocus, which pops the keyboard the instant
+// the app opens on a phone. Until the user's first real tap, blur any input that
+// programmatically grabs focus; a user-initiated focus afterwards works normally.
+function suppressLaunchAutofocus(): void {
+  let userActed = false
+  const onFocusIn = (e: FocusEvent) => {
+    if (userActed) return
+    const t = e.target as HTMLElement | null
+    if (t && (t.tagName === 'TEXTAREA' || t.tagName === 'INPUT' || t.isContentEditable)) {
+      t.blur()
+    }
+  }
+  const stop = () => {
+    userActed = true
+    document.removeEventListener('focusin', onFocusIn, true)
+  }
+  document.addEventListener('focusin', onFocusIn, true)
+  document.addEventListener('pointerdown', stop, { capture: true, once: true })
+  // Safety: lift the suppression after the launch window regardless.
+  window.setTimeout(stop, 4000)
 }
 
 export function initMobileUi(): void {
@@ -34,12 +68,21 @@ export function initMobileUi(): void {
     prev = id
   })
 
+  installDrawerBackdrop()
+  suppressLaunchAutofocus()
+
   // Keep the app height pinned to the visual viewport so the composer rides
   // above the on-screen keyboard (this WKWebView doesn't resize for it). The
-  // shell consumes --app-height in mobile-ios.css.
+  // shell consumes --app-height in mobile-ios.css. We also force the document
+  // scroll back to the top: iOS auto-scrolls the page to reveal a focused input
+  // and, when the keyboard hides, leaves it scrolled — which pushed the composer
+  // out of view ("climbs upstairs"). The body is locked in CSS so this sticks.
   const vv = window.visualViewport
   if (vv) {
-    const sync = () => document.documentElement.style.setProperty('--app-height', `${vv.height}px`)
+    const sync = () => {
+      document.documentElement.style.setProperty('--app-height', `${vv.height}px`)
+      window.scrollTo(0, 0)
+    }
     sync()
     vv.addEventListener('resize', sync)
     vv.addEventListener('scroll', sync)
