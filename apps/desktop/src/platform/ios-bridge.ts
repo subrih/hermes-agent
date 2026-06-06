@@ -291,8 +291,12 @@ function buildBridge() {
     profile: {
       get: async () => ({ profile: (await Preferences.get({ key: PROFILE_KEY })).value ?? null }),
       set: async (name: string | null) => {
+        // [kaveri fork] Just persist the preference — do NOT reload. The desktop
+        // never reloads on a profile switch; the renderer swaps the gateway
+        // in-place (ensureGatewayProfile → getConnection(profile)) when you next
+        // send/open in that profile. Reloading here threw away that swap (boots
+        // back to the primary/cockpit) and slammed the mobile drawer shut.
         await Preferences.set({ key: PROFILE_KEY, value: name ?? '' })
-        setTimeout(() => window.location.reload(), 150)
         return { profile: name }
       }
     },
