@@ -54,10 +54,17 @@
     padding-bottom: env(safe-area-inset-bottom);
   }
 
-  /* Drawer backdrop: dims + captures taps when the sidebar drawer is open. */
+  /* Drawer backdrop: dims + captures taps to close, but ONLY over the exposed
+   * chat strip to the right of the drawer. It's a body-level element, so a
+   * full-screen inset:0 would paint OVER the drawer (whose z-index is trapped in
+   * a nested stacking context) and swallow every tap on the sidebar. Starting it
+   * at the drawer's right edge keeps the drawer fully tappable. */
   [data-platform='ios'] #mobile-drawer-backdrop {
     position: fixed;
-    inset: 0;
+    top: 0;
+    bottom: 0;
+    right: 0;
+    left: min(86vw, 21rem);
     z-index: 55;
     background: rgb(0 0 0 / 0.4);
     opacity: 0;
@@ -115,5 +122,13 @@
    * so pad its own top so its header clears the notch when open. */
   [data-platform='ios'] [data-pane-id='chat-sidebar'] {
     padding-top: env(safe-area-inset-top);
+  }
+
+  /* Touch targets: the profile-rail pills are sized for a mouse (~1.25rem) —
+   * far too small to tap reliably on a phone. Give them a proper ~2.5rem hit
+   * area. */
+  [data-platform='ios'] [aria-label='Profiles'] button {
+    min-width: 2.5rem;
+    min-height: 2.5rem;
   }
 }

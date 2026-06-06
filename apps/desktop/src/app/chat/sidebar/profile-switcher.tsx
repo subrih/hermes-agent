@@ -357,11 +357,21 @@ function ProfileSquare({ active, color, label, onDelete, onRecolor, onRename, on
   const [pickerOpen, setPickerOpen] = useState(false)
   const pressTimer = useRef<null | number>(null)
   const suppressClick = useRef(false)
+  // [kaveri fork] pointerdown position, to recognize a clean touch tap on iOS
+  // (where the synthetic click is suppressed after the dnd pointer capture).
+  const downXY = useRef<{ x: number; y: number } | null>(null)
 
   const { attributes, isDragging, listeners, setNodeRef, transform, transition } = useSortable({
     id: label,
     transition: RAIL_TRANSITION
   })
+
+  // [kaveri fork] On iOS the dnd-kit pointer listeners capture the tap (and iOS
+  // then suppresses the synthetic click), so onSelect never fired — the pill did
+  // nothing. Drag-to-reorder isn't a phone gesture anyway, so on iOS we drop the
+  // drag listeners + touch-action:none and let the button tap natively.
+  const isIos = typeof document !== 'undefined' && document.documentElement.dataset.platform === 'ios'
+  const dragListeners = isIos ? undefined : listeners
 
   const clearPress = () => {
     if (pressTimer.current != null) {
@@ -399,7 +409,8 @@ function ProfileSquare({ active, color, label, onDelete, onRecolor, onRename, on
                 <TooltipTrigger asChild>
                   <button
                     className={cn(
-                      'grid size-5 shrink-0 cursor-grab touch-none select-none place-items-center rounded-[3px] text-[0.5625rem] font-semibold uppercase leading-none transition-opacity hover:opacity-100',
+                      'grid size-5 shrink-0 select-none place-items-center rounded-[3px] text-[0.5625rem] font-semibold uppercase leading-none transition-opacity hover:opacity-100',
+                      !isIos && 'cursor-grab touch-none', // [kaveri fork] keep taps native on iOS
                       active ? 'opacity-100' : 'opacity-55',
                       isDragging && 'z-10 cursor-grabbing opacity-100'
                     )}
@@ -415,7 +426,7 @@ function ProfileSquare({ active, color, label, onDelete, onRecolor, onRename, on
                     }}
                     type="button"
                     {...attributes}
-                    {...listeners}
+                    {...dragListeners}
                     aria-label={label}
                     aria-pressed={active}
                     // Hold-to-recolor rides alongside the dnd pointer listener (call
@@ -432,7 +443,8 @@ function ProfileSquare({ active, color, label, onDelete, onRecolor, onRename, on
                     }}
                     onPointerCancel={clearPress}
                     onPointerDown={event => {
-                      listeners?.onPointerDown?.(event)
+                      dragListeners?.onPointerDown?.(event)
+                      downXY.current = { x: event.clientX, y: event.clientY }
 
                       if (event.button !== 0) {
                         return
@@ -447,7 +459,20 @@ function ProfileSquare({ active, color, label, onDelete, onRecolor, onRename, on
                       }, LONG_PRESS_MS)
                     }}
                     onPointerLeave={clearPress}
-                    onPointerUp={clearPress}
+                    onPointerUp={event => {
+                      clearPress()
+                      // [kaveri fork] Touch fallback: iOS can suppress the synthetic
+                      // click, so fire the selection here for a clean tap — not a
+                      // drag (movement guard) and not a long-press (suppressClick).
+                      // selectProfile is idempotent, so a trailing click is harmless.
+                      if (isDragging || suppressClick.current) {
+                        return
+                      }
+                      const start = downXY.current
+                      if (start && Math.hypot(event.clientX - start.x, event.clientY - start.y) < 8) {
+                        onSelect()
+                      }
+                    }}
                   >
                     {label.replace(/[^a-z0-9]/gi, '').charAt(0) || '?'}
                   </button>
