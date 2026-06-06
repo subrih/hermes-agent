@@ -6,7 +6,7 @@
 
 import { Capacitor } from '@capacitor/core'
 
-import { $sidebarOpen, FILE_BROWSER_PANE_ID, setSidebarOpen } from '@/store/layout'
+import { $panesFlipped, $sidebarOpen, FILE_BROWSER_PANE_ID, setSidebarOpen } from '@/store/layout'
 import { setPaneOpen } from '@/store/panes'
 import { $activeGatewayProfile } from '@/store/profile'
 import { $selectedStoredSessionId } from '@/store/session'
@@ -61,6 +61,11 @@ export function initMobileUi(): void {
   setSidebarOpen(false)
   setPaneOpen(FILE_BROWSER_PANE_ID, false)
   setPaneOpen('preview', false)
+  // Force the un-flipped layout on iOS: the flip toggle is hidden on the phone,
+  // so a persisted panesFlipped=true would move the chat-sidebar toggle to the
+  // (also hidden) right button — leaving NO way to open the drawer. Pin it false
+  // so the single left toggle always opens the chat sidebar.
+  $panesFlipped.set(false)
 
   // Picking a session closes the drawer so the conversation is visible.
   let prev = $selectedStoredSessionId.get()
