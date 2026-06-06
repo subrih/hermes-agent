@@ -29,6 +29,7 @@ const { runBootstrap } = require('./bootstrap-runner.cjs')
 const { canImportHermesCli, verifyHermesCli } = require('./backend-probes.cjs')
 const { probeGatewayWebSocket } = require('./gateway-ws-probe.cjs')
 const { serializeJsonBody, setJsonRequestHeaders } = require('./oauth-net-request.cjs')
+const webUpdate = require('./web-update.cjs') // [kaveri fork] OTA renderer-bundle updates
 const {
   buildPosixCleanupScript,
   buildWindowsCleanupScript,
@@ -4726,7 +4727,11 @@ function createWindow() {
   if (DEV_SERVER) {
     mainWindow.loadURL(DEV_SERVER)
   } else {
-    mainWindow.loadURL(pathToFileURL(resolveRendererIndex()).toString())
+    // [kaveri fork] Prefer the newest OTA-cached renderer bundle over the
+    // app-bundled dist (falls back to dist when none cached). Same channel the
+    // iPhone uses, so one publish updates both.
+    const cachedIndex = IS_PACKAGED ? webUpdate.activeRendererIndex() : null
+    mainWindow.loadURL(pathToFileURL(cachedIndex || resolveRendererIndex()).toString())
   }
 
   mainWindow.webContents.once('did-finish-load', () => {
@@ -4734,6 +4739,12 @@ function createWindow() {
     sendWindowStateChanged()
     startHermes().catch(error => rememberLog(error.stack || error.message))
   })
+
+  // [kaveri fork] Background: pull a newer renderer bundle from the OTA channel
+  // and reload into it. Packaged builds only; never the dev server.
+  if (IS_PACKAGED && !DEV_SERVER) {
+    webUpdate.runWebUpdate(mainWindow, msg => rememberLog(`[web-update] ${msg}`))
+  }
 }
 
 ipcMain.handle('hermes:connection', async (_event, profile) => ensureBackend(profile))
