@@ -71,16 +71,18 @@ export function initMobileUi(): void {
   installDrawerBackdrop()
   suppressLaunchAutofocus()
 
-  // Keep the app height pinned to the visual viewport so the composer rides
-  // above the on-screen keyboard (this WKWebView doesn't resize for it). The
-  // shell consumes --app-height in mobile-ios.css. We also force the document
-  // scroll back to the top: iOS auto-scrolls the page to reveal a focused input
-  // and, when the keyboard hides, leaves it scrolled — which pushed the composer
-  // out of view ("climbs upstairs"). The body is locked in CSS so this sticks.
+  // Anchor the app shell to the visual viewport box so the composer always rides
+  // above the on-screen keyboard and snaps back when it hides. The shell is
+  // position:fixed in mobile-ios.css; we feed it the viewport's height AND top
+  // offset. Tracking offsetTop (not just height) is what fixes the "composer
+  // climbs upstairs after dismissing the keyboard" bug — on a device the visual
+  // viewport can be shifted, not only shrunk, and height alone misses that.
   const vv = window.visualViewport
   if (vv) {
+    const root = document.documentElement.style
     const sync = () => {
-      document.documentElement.style.setProperty('--app-height', `${vv.height}px`)
+      root.setProperty('--app-height', `${vv.height}px`)
+      root.setProperty('--vv-top', `${vv.offsetTop}px`)
       window.scrollTo(0, 0)
     }
     sync()
