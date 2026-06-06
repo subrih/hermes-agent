@@ -11,6 +11,14 @@ const config: CapacitorConfig = {
   webDir: '../desktop/dist',
   ios: {
     contentInset: 'always'
+  },
+  plugins: {
+    // [kaveri fork] Live web-bundle updates (Capgo), manual/self-hosted: we
+    // drive download+set ourselves from our OTA server. autoUpdate off so the
+    // plugin doesn't phone Capgo's cloud. See src/platform/live-update.ts.
+    CapacitorUpdater: {
+      autoUpdate: false
+    }
   }
 }
 
