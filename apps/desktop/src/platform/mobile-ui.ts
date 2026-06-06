@@ -80,10 +80,19 @@ export function initMobileUi(): void {
   const vv = window.visualViewport
   if (vv) {
     const root = document.documentElement.style
+    let lastH = -1
+    let lastT = -1
     const sync = () => {
-      root.setProperty('--app-height', `${vv.height}px`)
-      root.setProperty('--vv-top', `${vv.offsetTop}px`)
-      window.scrollTo(0, 0)
+      const h = Math.round(vv.height)
+      const t = Math.round(vv.offsetTop)
+      // Only write when the box actually changed — writing unconditionally on the
+      // viewport 'scroll' event (and NOT calling scrollTo, which re-fired it) is
+      // what caused the fast screen-shiver feedback loop.
+      if (h === lastH && t === lastT) return
+      lastH = h
+      lastT = t
+      root.setProperty('--app-height', `${h}px`)
+      root.setProperty('--vv-top', `${t}px`)
     }
     sync()
     vv.addEventListener('resize', sync)

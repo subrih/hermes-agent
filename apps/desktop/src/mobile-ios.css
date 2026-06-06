@@ -31,12 +31,17 @@
   }
 
   /* Lock the document so iOS can't scroll/rubber-band the whole page when an
-   * input is focused. All scrolling happens inside the app's own panes. */
-  [data-platform='ios'],
+   * input is focused. The shell is fixed to the viewport above; all real
+   * scrolling happens inside the app's own panes. */
+  [data-platform='ios'] {
+    height: 100%;
+    overflow: hidden;
+  }
   [data-platform='ios'] body {
+    position: fixed;
+    inset: 0;
     overflow: hidden;
     overscroll-behavior: none;
-    height: 100%;
   }
 
   /* Drawer backdrop: dims + captures taps when the sidebar drawer is open. */
