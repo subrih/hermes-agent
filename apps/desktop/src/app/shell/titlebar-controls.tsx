@@ -53,6 +53,11 @@ export function TitlebarControls({ leftTools = [], tools = [], onOpenSettings }:
   const fileBrowserOpen = useStore($fileBrowserOpen)
   const sidebarOpen = useStore($sidebarOpen)
   const panesFlipped = useStore($panesFlipped)
+  // [kaveri fork] iOS: hide desktop-only chrome — pane flip, the file-browser /
+  // right-sidebar toggle (the folder tree is unsupported on the phone and shows
+  // "UNREADABLE"), and pane-supplied tools (preview/terminal). Keep the chat
+  // sidebar toggle, haptics, and settings.
+  const isIos = typeof document !== 'undefined' && document.documentElement.dataset.platform === 'ios'
 
   const toggleHaptics = () => {
     if (!hapticsMuted) {
@@ -148,7 +153,7 @@ export function TitlebarControls({ leftTools = [], tools = [], onOpenSettings }:
   const visibleSystemTools = systemTools.filter(tool => !tool.hidden)
   const settingsTool = visibleSystemTools.find(tool => tool.id === 'settings')
   const visibleSystemToolsBeforeSettings = visibleSystemTools.filter(tool => tool.id !== 'settings')
-  const visiblePaneTools = tools.filter(tool => !tool.hidden)
+  const visiblePaneTools = isIos ? [] : tools.filter(tool => !tool.hidden)
 
   return (
     <>
@@ -157,7 +162,7 @@ export function TitlebarControls({ leftTools = [], tools = [], onOpenSettings }:
         className="fixed left-(--titlebar-controls-left) top-(--titlebar-controls-top) z-70 flex translate-y-0.5 flex-row items-center gap-x-1 pointer-events-auto select-none [-webkit-app-region:no-drag]"
       >
         {leftToolbarTools
-          .filter(tool => !tool.hidden)
+          .filter(tool => !tool.hidden && (!isIos || tool.id === 'sidebar'))
           .map(tool => (
             <TitlebarToolButton key={tool.id} navigate={navigate} tool={tool} />
           ))}
@@ -190,7 +195,7 @@ export function TitlebarControls({ leftTools = [], tools = [], onOpenSettings }:
           <TitlebarToolButton key={tool.id} navigate={navigate} tool={tool} />
         ))}
         {settingsTool && <TitlebarToolButton navigate={navigate} tool={settingsTool} />}
-        <TitlebarToolButton navigate={navigate} tool={rightSidebarTool} />
+        {!isIos && <TitlebarToolButton navigate={navigate} tool={rightSidebarTool} />}
       </div>
     </>
   )
