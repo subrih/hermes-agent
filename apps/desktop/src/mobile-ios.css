@@ -18,6 +18,16 @@
     --chat-min-width: 0rem;
   }
 
+  /* iOS auto-zooms when focusing a text field whose font-size is < 16px (it
+   * widened the page → horizontal scroll with the keyboard). Bump focusable
+   * text entry to 16px so iOS leaves the zoom alone — keeps pinch-to-zoom
+   * enabled (vs the blunt maximum-scale=1, which kills it). */
+  [data-platform='ios'] input,
+  [data-platform='ios'] textarea,
+  [data-platform='ios'] [contenteditable='true'] {
+    font-size: max(16px, 1em);
+  }
+
   /* Keyboard handling is native (capacitor.config Keyboard.resize='native'):
    * the WKWebView frame shrinks when the keyboard shows, so the normal-flow
    * shell (full height) tracks it and the composer stays above the keyboard.
