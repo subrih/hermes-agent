@@ -1,0 +1,17 @@
+import type { CapacitorConfig } from '@capacitor/cli'
+
+// Kaveri mobile = the Hermes desktop React renderer wrapped in Capacitor.
+// webDir points at the desktop app's Vite build so we ship the exact same
+// bundle (vite base is already './', WKWebView-compatible). The iOS bridge
+// (window.hermesDesktop shim) is part of that bundle and self-activates under
+// Capacitor; native HTTP/WS + CF Access headers are provided by Capacitor.
+const config: CapacitorConfig = {
+  appId: 'ai.kaveri.hermes',
+  appName: 'Kaveri',
+  webDir: '../desktop/dist',
+  ios: {
+    contentInset: 'always'
+  }
+}
+
+export default config

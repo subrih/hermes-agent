@@ -11,6 +11,7 @@ import { HapticsProvider } from './components/haptics-provider'
 import { I18nProvider } from './i18n'
 import { installClipboardShim } from './lib/clipboard'
 import { queryClient } from './lib/query-client'
+import { initIosBridge } from './platform/ios-bridge' // [kaveri fork] no-op off Capacitor
 import { ThemeProvider } from './themes/context'
 
 installClipboardShim()
@@ -24,20 +25,28 @@ if (import.meta.env.MODE !== 'production') {
   import('./app/chat/perf-probe')
 }
 
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <ErrorBoundary label="root">
-      <QueryClientProvider client={queryClient}>
-        <I18nProvider>
-          <ThemeProvider>
-            <HapticsProvider>
-              <HashRouter>
-                <App />
-              </HashRouter>
-            </HapticsProvider>
-          </ThemeProvider>
-        </I18nProvider>
-      </QueryClientProvider>
-    </ErrorBoundary>
-  </StrictMode>
-)
+// [kaveri fork] On iOS (Capacitor) install the native `window.hermesDesktop`
+// bridge BEFORE first render so the boot/connection flow finds it. No-op on
+// desktop (Electron's preload already provides the bridge).
+async function bootstrap() {
+  await initIosBridge()
+  createRoot(document.getElementById('root')!).render(
+    <StrictMode>
+      <ErrorBoundary label="root">
+        <QueryClientProvider client={queryClient}>
+          <I18nProvider>
+            <ThemeProvider>
+              <HapticsProvider>
+                <HashRouter>
+                  <App />
+                </HashRouter>
+              </HapticsProvider>
+            </ThemeProvider>
+          </I18nProvider>
+        </QueryClientProvider>
+      </ErrorBoundary>
+    </StrictMode>
+  )
+}
+
+void bootstrap()

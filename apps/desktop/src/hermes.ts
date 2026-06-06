@@ -109,7 +109,13 @@ export class HermesGateway extends JsonRpcGatewayClient {
       connectErrorMessage: 'Could not connect to Hermes gateway',
       createRequestId: nextId => nextId,
       notConnectedErrorMessage: 'Hermes gateway is not connected',
-      requestTimeoutMs: DEFAULT_GATEWAY_REQUEST_TIMEOUT_MS
+      requestTimeoutMs: DEFAULT_GATEWAY_REQUEST_TIMEOUT_MS,
+      // [kaveri fork] On iOS (Capacitor) a browser WebSocket can't set the
+      // Cloudflare Access headers the upgrade needs, so the iOS bridge installs
+      // a native socket factory (URLSessionWebSocketTask). Undefined on desktop
+      // → falls back to the browser WebSocket. See platform/ios-bridge.ts.
+      socketFactory: (globalThis as { __hermesNativeSocketFactory?: (url: string) => WebSocket })
+        .__hermesNativeSocketFactory
     })
   }
 }
