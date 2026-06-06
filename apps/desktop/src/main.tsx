@@ -1,4 +1,5 @@
 import './styles.css'
+import './mobile-ios.css' // [kaveri fork] iOS responsive overrides (scoped [data-platform="ios"])
 
 import { QueryClientProvider } from '@tanstack/react-query'
 import { StrictMode } from 'react'
@@ -13,6 +14,7 @@ import { installClipboardShim } from './lib/clipboard'
 import { queryClient } from './lib/query-client'
 import { initIosBridge } from './platform/ios-bridge' // [kaveri fork] no-op off Capacitor
 import { runLiveUpdate } from './platform/live-update' // [kaveri fork] no-op off Capacitor
+import { initMobileUi } from './platform/mobile-ui' // [kaveri fork] no-op off Capacitor
 import { ThemeProvider } from './themes/context'
 
 installClipboardShim()
@@ -50,6 +52,8 @@ async function bootstrap() {
   )
   // [kaveri fork] iOS: confirm bundle health + pull any newer web bundle (OTA).
   void runLiveUpdate()
+  // [kaveri fork] iOS: mobile interaction defaults (open on chat, drawer dismiss).
+  initMobileUi()
 }
 
 void bootstrap()

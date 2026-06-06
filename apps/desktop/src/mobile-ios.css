@@ -1,0 +1,81 @@
+/* [kaveri fork] iOS responsive overrides.
+ *
+ * Scoped under [data-platform="ios"] (set on <html> in ios-bridge.ts) AND the
+ * mobile breakpoint, so desktop/Electron and iPad landscape are completely
+ * unaffected. This is pure CSS layered over the existing DOM — no edits to the
+ * layout components — to keep the fork's rebase surface minimal.
+ *
+ * The app already flips useIsMobile() below 768px (the shadcn chat sidebar can
+ * render as a Sheet). What is NOT responsive is the custom PaneShell grid, which
+ * lays panes out as columns by open-state regardless of viewport — so the
+ * sidebar shows as a column and the chat is squeezed off-screen. These rules
+ * collapse that grid to a single column and turn the side panes into overlays.
+ */
+
+@media (max-width: 47.9375rem) {
+  /* Let the main chat shrink to the full narrow width (desktop reserves 28rem). */
+  [data-platform='ios'] {
+    --chat-min-width: 0rem;
+  }
+
+  /* Pin the app shell to the visual-viewport height (set by mobile-ui.ts) so the
+   * composer stays above the keyboard instead of being covered by it. */
+  [data-platform='ios'] [data-slot='sidebar-wrapper'] {
+    height: var(--app-height, 100vh) !important;
+  }
+
+  /* Collapse the PaneShell grid to one column. The grid sets
+   * grid-template-columns inline, so !important is required. :has() targets the
+   * grid via its pane-main child without touching the component. */
+  [data-platform='ios'] :has(> [data-pane-main='true']) {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* Main + every pane occupy the single column. */
+  [data-platform='ios'] [data-pane-main='true'],
+  [data-platform='ios'] [data-pane-id] {
+    grid-column: 1 / -1 !important;
+  }
+
+  /* Chat sidebar pane → left off-canvas drawer, slid in when open. */
+  [data-platform='ios'] [data-pane-id='chat-sidebar'] {
+    position: fixed;
+    inset-block: 0;
+    inset-inline-start: 0;
+    z-index: 60;
+    width: min(86vw, 21rem) !important;
+    transform: translateX(-100%);
+    transition: transform 0.22s ease;
+    box-shadow: 0 0 2.5rem rgb(0 0 0 / 0.45);
+  }
+  [data-platform='ios'] [data-pane-id='chat-sidebar'][data-pane-open='true'] {
+    transform: translateX(0);
+  }
+
+  /* Right-side panes (preview, file browser) → full-screen overlays when open,
+   * removed from layout when closed. */
+  [data-platform='ios'] [data-pane-id='preview'],
+  [data-platform='ios'] [data-pane-id='file-browser'] {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    width: 100vw !important;
+  }
+  [data-platform='ios'] [data-pane-id='preview'][data-pane-open='false'],
+  [data-platform='ios'] [data-pane-id='file-browser'][data-pane-open='false'] {
+    display: none;
+  }
+
+  /* Safe areas: the titlebar (and any header using --titlebar-height) clears the
+   * notch; the statusbar clears the home indicator. */
+  [data-platform='ios'] {
+    --titlebar-height: calc(2.125rem + env(safe-area-inset-top));
+  }
+  [data-platform='ios'] header.h-\(--titlebar-height\) {
+    padding-top: env(safe-area-inset-top);
+  }
+  [data-platform='ios'] footer.h-5 {
+    height: auto;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}

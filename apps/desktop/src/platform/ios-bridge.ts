@@ -422,6 +422,9 @@ export function isCapacitorIos(): boolean {
 
 export async function initIosBridge(): Promise<void> {
   if (!isCapacitorIos()) return
+  // [kaveri fork] Tag the root so the iOS responsive stylesheet (mobile-ios.css)
+  // can scope all its overrides under [data-platform="ios"] — desktop untouched.
+  document.documentElement.dataset.platform = 'ios'
   // Native socket factory for the gateway client (apps/shared json-rpc-gateway
   // picks this up via HermesGateway's ctor — see hermes.ts [kaveri fork]).
   ;(window as any).__hermesNativeSocketFactory = (url: string) => {
