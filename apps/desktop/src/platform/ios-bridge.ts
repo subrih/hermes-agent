@@ -26,15 +26,16 @@ interface StoredConfig {
 
 let cachedConfig: StoredConfig | null = null
 
-// [kaveri fork] First-run default so the device build connects out of the box.
-// TODO(phase2): move these to on-device entry stored in the iOS Keychain
-// instead of baking them into the binary (this IPA is personal/ad-hoc only).
+// [kaveri fork] First-run default. Secrets are NO LONGER baked in — only the
+// (non-secret) gateway URL is pre-filled for convenience. With no token the app
+// boots into the connection-setup path (getConnection throws → boot-failure
+// overlay → "Open settings"), where the user enters the token + CF Access creds
+// once; they're then stored on-device (@capacitor/preferences). Existing
+// installs are unaffected: push-1's auto-migrate already persisted their creds.
 const DEFAULT_CONFIG: StoredConfig = {
   mode: 'remote',
   remoteUrl: 'https://kav.hellopulse.ai',
-  token: 'Z2JcYvCjnThi-mC4hWfG_XtAZggsZq1UapUGT9p9HOs',
-  cfAccessId: '857150541c167b0a4edeccd94391515b.access',
-  cfAccessSecret: 'c473ae93ab91296463af1326433f3cf70a6fa79c53c1e11a60b8f507c9651cc2'
+  token: ''
 }
 
 async function loadConfig(): Promise<StoredConfig> {
@@ -117,6 +118,14 @@ async function apiRequest<T>(request: {
   profile?: string | null
 }): Promise<T> {
   const cfg = await loadConfig()
+  // [kaveri fork] Unconfigured: fail fast. Without a token (and CF Access creds)
+  // a request to a CF-gated host returns the Cloudflare Access *login page* with
+  // status 200 — which would otherwise be parsed as data and poison stores
+  // (e.g. $profiles.set(undefined) → ChatSidebar crash). Throwing keeps the
+  // best-effort store refreshers on their cached values until configured.
+  if (!cfg.token) {
+    throw new Error('No gateway configured. Open Settings → Gateway to enter your connection details.')
+  }
   const url = `${normBase(cfg.remoteUrl)}${request.path}`
   const res = await CapacitorHttp.request({
     url,
@@ -230,7 +239,18 @@ const rejectUnsupported = () => Promise.reject(new Error('Not available on iOS')
 
 function buildBridge() {
   return {
-    getConnection: async (profile?: string | null) => buildConnection(await loadConfig(), profile),
+    getConnection: async (profile?: string | null) => {
+      const cfg = await loadConfig()
+      // [kaveri fork] Unconfigured (secrets de-baked): fail boot deliberately so
+      // the boot-failure overlay shows its "Open settings" path instead of
+      // silently spinning on a doomed, token-less connection.
+      if (!cfg.token) {
+        throw new Error(
+          'No gateway configured. Open Settings → Gateway to enter your remote URL, session token, and Cloudflare Access credentials.'
+        )
+      }
+      return buildConnection(cfg, profile)
+    },
     getGatewayWsUrl: async (profile?: string | null) => wsUrlFor(await loadConfig(), profile),
     touchBackend: async () => ({ ok: true }),
     getBootProgress: async () => ({ error: null, fakeMode: false, message: '', phase: 'ready', progress: 100, running: false, timestamp: Date.now() }),
@@ -334,6 +354,64 @@ function buildBridge() {
   }
 }
 
+// [kaveri fork] Self-contained connection-setup overlay for a fresh (unconfigured)
+// iOS install. Secrets are no longer baked in, so a clean install has no token.
+// Rather than route through the app's boot/onboarding overlays (which collide on
+// iOS), we paint our own full-screen form ABOVE everything (max z-index). On save
+// we persist to Preferences and reload; the app then boots normally. The saved
+// URL + CF id are pre-filled; secrets are entered fresh.
+function showSetupForm(cfg: StoredConfig): void {
+  if (document.getElementById('hermes-ios-setup')) return
+  const wrap = document.createElement('div')
+  wrap.id = 'hermes-ios-setup'
+  wrap.style.cssText =
+    'position:fixed;inset:0;z-index:2147483647;background:#0b0f1a;color:#e7ecf3;' +
+    'font:14px -apple-system,system-ui,sans-serif;overflow:auto;' +
+    'padding:max(48px,env(safe-area-inset-top)) 20px calc(40px + env(safe-area-inset-bottom));'
+  const field = (label: string, id: string, type: string, placeholder: string) =>
+    `<label style="display:block;margin:0 0 14px">
+       <div style="font-size:12px;color:#9aa7bd;margin:0 0 6px">${label}</div>
+       <input id="${id}" type="${type}" placeholder="${placeholder}" autocapitalize="off" autocorrect="off" spellcheck="false"
+         style="width:100%;box-sizing:border-box;padding:11px 12px;border:1px solid #2a3550;border-radius:10px;background:#121a2b;color:#e7ecf3;font:14px ui-monospace,monospace" />
+     </label>`
+  wrap.innerHTML =
+    `<div style="max-width:480px;margin:0 auto">
+       <h1 style="font-size:20px;font-weight:600;margin:0 0 6px">Connect to Kaveri</h1>
+       <p style="font-size:13px;color:#9aa7bd;margin:0 0 22px;line-height:1.5">Enter your gateway URL, session token, and Cloudflare Access service token. Stored only on this device.</p>
+       ${field('Gateway URL', 'f-url', 'url', 'https://kav.hellopulse.ai')}
+       ${field('Session token', 'f-token', 'password', 'dashboard session token')}
+       ${field('CF Access client ID', 'f-cfid', 'text', 'xxxx.access')}
+       ${field('CF Access client secret', 'f-cfsecret', 'password', 'client secret')}
+       <button id="f-save" style="width:100%;margin-top:8px;padding:13px;border:0;border-radius:10px;background:#2f6df6;color:#fff;font-size:15px;font-weight:600">Connect</button>
+       <div id="f-err" style="color:#ff8a8a;font-size:12px;margin-top:10px;min-height:14px"></div>
+     </div>`
+  document.body.appendChild(wrap)
+  // Pre-fill non-secret saved values via .value (avoids HTML-injection).
+  ;(document.getElementById('f-url') as HTMLInputElement).value = cfg.remoteUrl || ''
+  ;(document.getElementById('f-cfid') as HTMLInputElement).value = cfg.cfAccessId || ''
+  const val = (id: string) => (document.getElementById(id) as HTMLInputElement | null)?.value.trim() ?? ''
+  document.getElementById('f-save')?.addEventListener('click', () => {
+    const err = document.getElementById('f-err')!
+    const remoteUrl = val('f-url')
+    const remoteToken = val('f-token')
+    if (!remoteUrl || !remoteToken) {
+      err.textContent = 'Gateway URL and session token are required.'
+      return
+    }
+    void persistConfigInput({
+      mode: 'remote',
+      remoteUrl,
+      remoteToken,
+      cfAccessId: val('f-cfid'),
+      cfAccessSecret: val('f-cfsecret')
+    })
+      .then(() => window.location.reload())
+      .catch(e => {
+        err.textContent = String(e)
+      })
+  })
+}
+
 export function isCapacitorIos(): boolean {
   try {
     return Capacitor.isNativePlatform()
@@ -358,4 +436,8 @@ export async function initIosBridge(): Promise<void> {
   await loadConfig()
   if (!stored.value && cachedConfig) await saveConfig(cachedConfig)
   ;(window as any).hermesDesktop = buildBridge()
+  // [kaveri fork] No token yet (fresh install, secrets de-baked) → paint the
+  // setup form over the app. The app still boots underneath (harmless: api
+  // calls fail fast without a token), but this overlay sits above everything.
+  if (!cachedConfig?.token) showSetupForm(cachedConfig ?? DEFAULT_CONFIG)
 }
