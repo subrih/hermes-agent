@@ -29,6 +29,14 @@
     overscroll-behavior: none;
   }
 
+  /* The upstream shell is h-screen (100vh). On iOS WKWebView 100vh is the LARGE
+   * viewport — taller than the actual webview frame — so the shell overflowed
+   * and the page scrolled. Pin it to 100% of the (keyboard-resized) webview. */
+  [data-platform='ios'] [data-slot='sidebar-wrapper'] {
+    height: 100% !important;
+    max-height: 100% !important;
+  }
+
   /* Drawer backdrop: dims + captures taps when the sidebar drawer is open. */
   [data-platform='ios'] #mobile-drawer-backdrop {
     position: fixed;
