@@ -41,10 +41,17 @@
 
   /* The upstream shell is h-screen (100vh). On iOS WKWebView 100vh is the LARGE
    * viewport — taller than the actual webview frame — so the shell overflowed
-   * and the page scrolled. Pin it to 100% of the (keyboard-resized) webview. */
+   * and the page scrolled. Pin it to 100% of the (keyboard-resized) webview, and
+   * apply the notch/home-indicator safe areas ONCE here (border-box keeps the
+   * content inside 100%). Doing it on the shell — rather than inflating
+   * --titlebar-height and padding each header — avoids double-counting across
+   * the stacked window-titlebar + session-header rows (which clipped the title). */
   [data-platform='ios'] [data-slot='sidebar-wrapper'] {
     height: 100% !important;
     max-height: 100% !important;
+    box-sizing: border-box;
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
   }
 
   /* Drawer backdrop: dims + captures taps when the sidebar drawer is open. */
@@ -104,16 +111,9 @@
     display: none;
   }
 
-  /* Safe areas: the titlebar (and any header using --titlebar-height) clears the
-   * notch; the statusbar clears the home indicator. */
-  [data-platform='ios'] {
-    --titlebar-height: calc(2.125rem + env(safe-area-inset-top));
-  }
-  [data-platform='ios'] header.h-\(--titlebar-height\) {
+  /* The sidebar drawer is position:fixed (ignores the shell's safe-area padding),
+   * so pad its own top so its header clears the notch when open. */
+  [data-platform='ios'] [data-pane-id='chat-sidebar'] {
     padding-top: env(safe-area-inset-top);
-  }
-  [data-platform='ios'] footer.h-5 {
-    height: auto;
-    padding-bottom: env(safe-area-inset-bottom);
   }
 }
