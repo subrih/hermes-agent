@@ -10,7 +10,11 @@ const config: CapacitorConfig = {
   appName: 'Kaveri',
   webDir: '../desktop/dist',
   ios: {
-    contentInset: 'always'
+    // [kaveri fork] 'never' = WKWebView renders edge-to-edge and does NOT apply
+    // its own scroll-view safe-area inset. We handle safe areas precisely in CSS
+    // via env(safe-area-inset-*) (viewport-fit=cover). 'always' fought env()
+    // (reported 0 until a layout pass), forcing hardcoded gutter fallbacks.
+    contentInset: 'never'
   },
   plugins: {
     // [kaveri fork] Live web-bundle updates (Capgo), manual/self-hosted: we
