@@ -1491,6 +1491,63 @@ async def transcribe_audio_upload(payload: AudioTranscriptionRequest):
     }
 
 
+# [kaveri fork] Image attachment upload. Remote clients (Mac/iOS app) share no
+# filesystem with the gateway, so the path-based `image.attach` JSON-RPC can't
+# reach a client file — and a multi-MB base64 over the WS blows the frame limit
+# and drops the connection. So images upload over HTTP here (like audio), land
+# in a temp file ON THE GATEWAY, and the client then calls `image.attach` with
+# the returned gateway-local path.
+_MAX_IMAGE_UPLOAD_BYTES = 25 * 1024 * 1024
+
+
+class ImageUploadRequest(BaseModel):
+    data_url: str
+    filename: Optional[str] = None
+
+
+@app.post("/api/image/upload")
+async def image_upload(payload: ImageUploadRequest, request: Request):
+    _require_token(request)
+    from cli import _IMAGE_EXTENSIONS
+
+    data_url = (payload.data_url or "").strip()
+    if not data_url.startswith("data:") or "," not in data_url:
+        raise HTTPException(status_code=400, detail="Invalid image payload")
+    header, encoded = data_url.split(",", 1)
+    if ";base64" not in header:
+        raise HTTPException(status_code=400, detail="Image must be base64 encoded")
+    try:
+        image_bytes = base64.b64decode(encoded, validate=True)
+    except (binascii.Error, ValueError):
+        raise HTTPException(status_code=400, detail="Image payload is not valid base64")
+    if not image_bytes:
+        raise HTTPException(status_code=400, detail="Image is empty")
+    if len(image_bytes) > _MAX_IMAGE_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="Image is too large (max 25MB)")
+
+    # Extension from the data-URL mime (authoritative for the bytes — the client
+    # may have re-encoded on downscale); fall back to the filename's extension.
+    mime = header[5:].split(";", 1)[0].strip().lower()
+    guessed = "." + mime.split("/", 1)[1] if "/" in mime else ""
+    suffix = ".jpg" if guessed == ".jpeg" else guessed
+    filename = (payload.filename or "").strip()
+    if suffix not in _IMAGE_EXTENSIONS and filename:
+        suffix = os.path.splitext(filename)[1].lower()
+    if suffix not in _IMAGE_EXTENSIONS:
+        raise HTTPException(status_code=400, detail=f"Unsupported image type: {suffix or 'unknown'}")
+
+    try:
+        with tempfile.NamedTemporaryFile(
+            prefix="hermes-attach-", suffix=suffix, delete=False
+        ) as tmp:
+            tmp.write(image_bytes)
+            temp_path = tmp.name
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Could not save image: {exc}")
+
+    return {"ok": True, "path": temp_path, "name": filename or os.path.basename(temp_path)}
+
+
 class TTSSpeakRequest(BaseModel):
     text: str
 

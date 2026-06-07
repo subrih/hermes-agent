@@ -1,7 +1,8 @@
 import type { AppendMessage, ThreadMessage } from '@assistant-ui/react'
 import { type MutableRefObject, useCallback } from 'react'
 
-import { getProfiles, transcribeAudio } from '@/hermes'
+import { getProfiles, transcribeAudio, uploadImage } from '@/hermes'
+import { optimizeImageDataUrl } from '@/lib/image-optimize'
 import { translateNow, type Translations, useI18n } from '@/i18n'
 import { branchGroupForUser, type ChatMessage, chatMessageText, textPart } from '@/lib/chat-messages'
 import {
@@ -243,16 +244,43 @@ export function usePromptActions({
       options: { updateComposerAttachments?: boolean } = {}
     ) => {
       const updateComposerAttachments = options.updateComposerAttachments ?? true
-      const images = attachments.filter(attachment => attachment.kind === 'image' && attachment.path)
+      // [kaveri fork] Accept attachments that carry bytes (previewUrl data URL)
+      // even with no filesystem path — that's the only shape iOS can produce, and
+      // it's also what makes a REMOTE Mac work (the gateway can't read the
+      // client's path; see image.attach data_url branch in tui_gateway).
+      const images = attachments.filter(
+        attachment => attachment.kind === 'image' && (attachment.path || attachment.previewUrl)
+      )
 
       for (const attachment of images) {
         if (attachment.attachedSessionId === sessionId) {
           continue
         }
 
+        // If we have the bytes (a data-URL preview), upload them over HTTP first
+        // and attach the gateway-local path it returns. This is what makes a
+        // REMOTE client work (the gateway can't read the client's path) and
+        // avoids putting multi-MB base64 on the WS (which drops the connection).
+        // No data URL → local desktop, attach the real path directly.
+        const dataUrl =
+          attachment.previewUrl && attachment.previewUrl.startsWith('data:') ? attachment.previewUrl : undefined
+        let attachPath = attachment.path
+        if (dataUrl) {
+          // Downscale before upload so it fits provider media limits (e.g.
+          // MiniMax's 10MB cap) — the gateway can't (no Pillow).
+          const optimized = await optimizeImageDataUrl(dataUrl)
+          const uploaded = await uploadImage(
+            optimized,
+            attachment.label || (attachment.path ? pathLabel(attachment.path) : undefined)
+          )
+          if (!uploaded?.path) {
+            throw new Error(`Could not upload ${attachment.label || 'image'}`)
+          }
+          attachPath = uploaded.path
+        }
         const result = await requestGateway<ImageAttachResponse>('image.attach', {
           session_id: sessionId,
-          path: attachment.path
+          path: attachPath
         })
 
         if (!result.attached) {
@@ -266,7 +294,9 @@ export function usePromptActions({
           addComposerAttachment({
             ...attachment,
             id: attachment.id,
-            label: attachedPath ? pathLabel(attachedPath) : attachment.label,
+            // Keep the friendly label when we uploaded bytes (the returned path is
+            // an opaque gateway temp file); only derive a label in the path flow.
+            label: dataUrl ? attachment.label : attachedPath ? pathLabel(attachedPath) : attachment.label,
             path: attachedPath,
             attachedSessionId: sessionId
           })
@@ -396,17 +426,18 @@ export function usePromptActions({
       }
 
       try {
-        await syncImageAttachmentsForSubmit(sessionId, attachments, {
-          updateComposerAttachments: usingComposerAttachments
-        })
-
+        // The whole attach+submit sequence self-heals a stale runtime session:
+        // image.attach (here) AND prompt.submit both carry session_id, and a
+        // "session not found" from EITHER means the backend never accepted the
+        // turn — so re-resuming and retrying once can't double-submit. (The
+        // attach step is why an image send could still dead-end on a stale
+        // session even though plain text was already covered.)
         try {
+          await syncImageAttachmentsForSubmit(sessionId, attachments, {
+            updateComposerAttachments: usingComposerAttachments
+          })
           await requestGateway('prompt.submit', { session_id: sessionId, text })
         } catch (submitErr) {
-          // A "session not found" rejection means the backend never accepted the
-          // turn, so re-resuming the stored session and retrying once cannot
-          // double-submit. Any other error (or a failed rebind) falls through to
-          // the normal error handling below.
           const rebound = isSessionNotFoundError(submitErr) ? await rebindActiveSession() : null
 
           if (!rebound) {

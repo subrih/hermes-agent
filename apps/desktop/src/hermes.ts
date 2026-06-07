@@ -717,6 +717,24 @@ export function speakText(text: string): Promise<AudioSpeakResponse> {
   })
 }
 
+// [kaveri fork] Upload image bytes to the gateway over HTTP (not the WS — large
+// base64 frames drop the WS connection). Returns a gateway-local temp path the
+// subsequent `image.attach` RPC can resolve. Makes attachments work on remote
+// Mac + iOS (no shared filesystem with the gateway).
+export interface ImageUploadResponse {
+  ok: boolean
+  path: string
+  name: string
+}
+
+export function uploadImage(dataUrl: string, filename?: string): Promise<ImageUploadResponse> {
+  return window.hermesDesktop.api<ImageUploadResponse>({
+    path: '/api/image/upload',
+    method: 'POST',
+    body: { data_url: dataUrl, filename }
+  })
+}
+
 export function getElevenLabsVoices(): Promise<ElevenLabsVoicesResponse> {
   return window.hermesDesktop.api<ElevenLabsVoicesResponse>({
     path: '/api/audio/elevenlabs/voices'
