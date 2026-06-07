@@ -54,9 +54,11 @@
     padding-top: env(safe-area-inset-top);
     padding-bottom: env(safe-area-inset-bottom);
     /* The titlebar control clusters are position:fixed (viewport-anchored), so
-     * the shell padding can't move them — push their --titlebar-controls-top
-     * (inline 6px) below the notch. !important beats the inline value. */
-    --titlebar-controls-top: calc(env(safe-area-inset-top) + 6px) !important;
+     * the shell padding can't move them — pin their --titlebar-controls-top
+     * (inline 6px) to the safe-area boundary (just under the status bar / Island;
+     * can't go higher without hitting the status-bar time/battery). !important
+     * beats the inline value. */
+    --titlebar-controls-top: env(safe-area-inset-top) !important;
   }
 
   /* Drawer backdrop: dims + captures taps to close, but ONLY over the exposed
