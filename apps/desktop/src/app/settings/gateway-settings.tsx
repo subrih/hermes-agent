@@ -597,7 +597,8 @@ export function GatewaySettings() {
         {/* [kaveri fork] iOS only: Cloudflare Access service token. The native
             client sets CF-Access-Client-Id/Secret on REST + WS (no sidecar on
             the phone). Hidden on desktop (bridge omits cfAccessSupported). */}
-        {state.cfAccessSupported && state.mode === 'remote' ? (
+        {state.cfAccessSupported &&
+        (state.mode === 'remote' || state.envOverride || Boolean(state.cfAccessId) || state.cfAccessSecretSet) ? (
           <>
             <ListRow
               action={

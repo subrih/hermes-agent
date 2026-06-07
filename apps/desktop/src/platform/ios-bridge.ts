@@ -258,7 +258,12 @@ function buildBridge() {
       const c = await loadConfig()
       return {
         envOverride: false,
-        mode: c.mode,
+        // [kaveri fork] Report the EFFECTIVE mode, not the raw stored field.
+        // buildConnection() always connects remotely (gating on token), so a
+        // device that stored mode:'local' from an early build would otherwise
+        // show "local" + hide the CF fields forever even though it's working
+        // remotely. Derive remote whenever a usable remote+token is configured.
+        mode: c.remoteUrl && c.token ? 'remote' : c.mode,
         remoteAuthMode: 'token' as const,
         remoteOauthConnected: false,
         remoteTokenPreview: c.token ? `...${c.token.slice(-6)}` : null,

@@ -526,6 +526,46 @@ export function DesktopController() {
     startFreshSessionDraft()
   }, [freshSessionRequest, startFreshSessionDraft])
 
+  // [kaveri fork] iOS foreground resync. When the app is backgrounded its
+  // WebSocket dies (close 1006) and the suspended webview misses any in-flight
+  // turn events — so returning to the app can leave the view frozen (e.g. stuck
+  // on "Analyzing image" after a send). Re-resume the active session once the
+  // app is visible AND the gateway is back open, but ONLY if the socket actually
+  // dropped — so a live local stream isn't disturbed. No-op off iOS.
+  useEffect(() => {
+    if (document.documentElement.dataset.platform !== 'ios') {
+      return
+    }
+
+    let sawDrop = $gatewayState.get() !== 'open'
+    const resync = () => {
+      const storedId = selectedStoredSessionIdRef.current
+      if (storedId) {
+        void resumeSession(storedId)
+      }
+    }
+    const maybeResync = () => {
+      if (sawDrop && document.visibilityState === 'visible' && $gatewayState.get() === 'open') {
+        sawDrop = false
+        resync()
+      }
+    }
+    const unsubGateway = $gatewayState.subscribe(state => {
+      if (state !== 'open') {
+        sawDrop = true
+      } else {
+        maybeResync()
+      }
+    })
+
+    document.addEventListener('visibilitychange', maybeResync)
+
+    return () => {
+      document.removeEventListener('visibilitychange', maybeResync)
+      unsubGateway()
+    }
+  }, [resumeSession, selectedStoredSessionIdRef])
+
   // Swapping the live gateway to another profile must re-pull that profile's
   // global model + active-profile pill. Both are nanostores, so the blanket
   // invalidateQueries() the profile store fires on swap doesn't touch them —
