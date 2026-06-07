@@ -10,7 +10,7 @@
 set -euo pipefail
 DESKTOP=/Users/kaveri/kaveri/src/apps/desktop
 DIST="$DESKTOP/dist"
-CHANNEL_DIR=/Users/kaveri/sangamam/var/ota/a3301684eb130bc7a0e7da61
+CHANNEL_DIR=/Users/kaveri/kaveri/var/ota/a3301684eb130bc7a0e7da61
 CHANNEL_URL=https://ota.hellopulse.ai/a3301684eb130bc7a0e7da61
 VERSION="${1:-$(date -u +%Y.%m.%d.%H%M%S)}"
 
