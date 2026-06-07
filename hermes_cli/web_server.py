@@ -8911,21 +8911,22 @@ async def gateway_ws(ws: WebSocket) -> None:
         await ws.close(code=4403)
         return
 
-    # [kaveri fork] Per-profile routing: a non-default ?profile= is proxied to
-    # that profile's own loopback dashboard (own HERMES_HOME → own MCP/SOUL/model).
-    # default/cockpit falls through to local in-process handling (unchanged).
+    from tui_gateway.ws import handle_ws
+
+    # [kaveri fork] Per-profile routing. The app carries the profile in the message
+    # params (session.create/prompt.submit), not the WS URL — so route_ws peeks the
+    # first routing frame and, for a non-default profile, proxies the whole
+    # connection to that profile's own loopback dashboard (own HERMES_HOME → own
+    # MCP/SOUL/model). default/cockpit is handled locally (buffered frames replayed
+    # into handle_ws). All logic lives in kaveri_profile_router; this is the only
+    # upstream hook. On any router failure, fall back to plain local handling.
     try:
         from hermes_cli import kaveri_profile_router as _kpr
 
-        _kpr_profile = ws.query_params.get("profile")
-        _kpr_port = _kpr.target_port(_kpr_profile)
-        if _kpr_port is not None:
-            await _kpr.proxy_ws(ws, _kpr.target_profile_name(_kpr_profile), _kpr_port)
-            return
+        await _kpr.route_ws(ws, handle_ws)
+        return
     except Exception:
         _log.exception("profile router hook failed; falling back to local handling")
-
-    from tui_gateway.ws import handle_ws
 
     await handle_ws(ws)
 

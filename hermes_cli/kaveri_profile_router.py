@@ -20,6 +20,7 @@ Design goals:
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import subprocess
 
@@ -106,26 +107,105 @@ def _shared_token() -> str:
     return _token_cache
 
 
-async def proxy_ws(ws, profile: str, port: int) -> None:
-    """Accept the client WebSocket and pump frames to/from the per-profile
-    dashboard's /api/ws. Best-effort: closes both sides on any error."""
+# JSON-RPC methods whose params carry the owning profile. The first such frame on
+# a connection decides where the whole connection is routed.
+_ROUTING_METHODS = frozenset(
+    {"session.create", "session.resume", "session.activate", "prompt.submit", "prompt.background"}
+)
+
+
+def _profile_from_frame(text: str) -> tuple[bool, str | None]:
+    """(is_decision_frame, profile). A decision frame is a routing method; its
+    params.profile (possibly absent → default) determines routing."""
+    try:
+        msg = json.loads(text)
+    except (ValueError, TypeError):
+        return False, None
+    if not isinstance(msg, dict) or msg.get("method") not in _ROUTING_METHODS:
+        return False, None
+    params = msg.get("params") if isinstance(msg.get("params"), dict) else {}
+    return True, (params or {}).get("profile")
+
+
+async def route_ws(ws, local_handler) -> None:
+    """Decide where a chat WS belongs by PEEKING its first frames.
+
+    The app carries the profile in the message params (session.create/prompt.submit),
+    not the WS URL — so we read the first routing frame, and if it names a
+    non-default profile, proxy the whole connection to that profile's loopback
+    dashboard (its own HERMES_HOME → its own MCP/SOUL/model). Otherwise we replay
+    the buffered frames into the local handler (cockpit, in-process) unchanged.
+
+    The client does not gate its first request on gateway.ready, so peeking before
+    proxying is safe. Connection-level (not per-message): the first routing frame
+    pins the connection — fine because the app opens a fresh socket per profile
+    context.
+    """
+    await ws.accept()
+
+    buffered: list[str] = []
+    port: int | None = None
+    profile_name = "default"
+    # Decide on the FIRST frame only — peeking further risks stalling a connection
+    # whose opening frame is a non-routing call (e.g. session.list) that needs a
+    # reply. A routing frame (session.create/prompt.submit/…) carries the profile;
+    # anything else routes local (cockpit). The app opens a fresh socket per profile
+    # context, so its first frame is the profile-bearing one.
+    try:
+        frame = await ws.receive_text()
+        buffered.append(frame)
+        is_decision, prof = _profile_from_frame(frame)
+        if is_decision:
+            port = target_port(prof)
+            profile_name = target_profile_name(prof)
+    except Exception as exc:  # noqa: BLE001 — client vanished mid-handshake
+        _log.debug("profile router: peek ended early: %s", exc)
+
+    _log.info("[kaveri router] decided profile=%r port=%r (%d peeked)", profile_name, port, len(buffered))
+
+    if port is None:
+        # Local/cockpit: replay buffered frames into the in-process handler.
+        _replay_into(ws, buffered)
+        await local_handler(ws)
+        return
+
+    # Proxy the whole connection to the per-profile dashboard.
     import websockets
 
     token = _shared_token()
-    upstream_url = f"ws://127.0.0.1:{port}/api/ws?profile={profile}&token={token}"
-
-    await ws.accept()
+    upstream_url = f"ws://127.0.0.1:{port}/api/ws?profile={profile_name}&token={token}"
     try:
         async with websockets.connect(
             upstream_url, open_timeout=15, max_size=None, ping_interval=None
         ) as upstream:
-            await _pump(ws, upstream, profile)
+            for frame in buffered:
+                await upstream.send(frame)
+            await _pump(ws, upstream, profile_name)
     except Exception as exc:  # noqa: BLE001 — best-effort proxy
-        _log.warning("profile router: %s proxy failed: %s", profile, exc)
+        _log.warning("profile router: %s proxy failed: %s", profile_name, exc)
         try:
             await ws.close(code=1011)
         except Exception:
             pass
+
+
+def _replay_into(ws, buffered: list[str]) -> None:
+    """Make the already-accepted ws transparently re-yield the buffered frames to
+    the local handler. Monkeypatch (not a wrapper subclass) so isinstance checks in
+    handle_ws/WSTransport still see a real WebSocket."""
+    pending = list(buffered)
+    real_receive = ws.receive_text
+
+    async def _accept_noop(*_a, **_k):  # handle_ws calls accept(); we already did
+        return None
+
+    async def _receive_replay():
+        if pending:
+            return pending.pop(0)
+        return await real_receive()
+
+    ws.accept = _accept_noop  # type: ignore[method-assign]
+    ws.receive_text = _receive_replay  # type: ignore[method-assign]
 
 
 async def _pump(ws, upstream, profile: str) -> None:
@@ -152,7 +232,7 @@ async def _pump(ws, upstream, profile: str) -> None:
 
     t1 = asyncio.create_task(client_to_upstream())
     t2 = asyncio.create_task(upstream_to_client())
-    done, pending = await asyncio.wait({t1, t2}, return_when=asyncio.FIRST_COMPLETED)
+    _done, pending = await asyncio.wait({t1, t2}, return_when=asyncio.FIRST_COMPLETED)
     for t in pending:
         t.cancel()
     try:
