@@ -162,6 +162,17 @@
     padding-bottom: var(--safe-bottom, env(safe-area-inset-bottom));
   }
 
+  /* Full-screen overlays (Settings, Command Center) are position:fixed inset:0,
+   * so they ignore the shell's safe-area padding and render under the Dynamic
+   * Island / home indicator. Pad the overlay root by the real insets (native
+   * --safe-* with env() fallback) on top of its base 0.75rem gutter. */
+  [data-platform='ios'] [data-slot='overlay-root'] {
+    padding-top: max(0.75rem, var(--safe-top, env(safe-area-inset-top)));
+    padding-bottom: max(0.75rem, var(--safe-bottom, env(safe-area-inset-bottom)));
+    padding-left: max(0.75rem, var(--safe-left, env(safe-area-inset-left)));
+    padding-right: max(0.75rem, var(--safe-right, env(safe-area-inset-right)));
+  }
+
   /* Touch targets: the profile-rail pills are sized for a mouse (~1.25rem) —
    * far too small to tap reliably on a phone. Give them a proper ~2.5rem hit
    * area. */

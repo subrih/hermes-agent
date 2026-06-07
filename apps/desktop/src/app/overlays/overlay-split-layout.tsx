@@ -38,6 +38,11 @@ export function OverlaySplitLayout({ children, className }: OverlaySplitLayoutPr
     <div
       className={cn(
         'grid h-full min-h-0 flex-1 grid-cols-[13rem_minmax(0,1fr)] overflow-hidden bg-transparent max-[47.5rem]:grid-cols-1',
+        // [kaveri fork] Single-column (phone): bound the rows so the nav takes
+        // its content height (capped + scrollable) and the main pane gets the
+        // rest and scrolls internally — otherwise both stack unbounded and the
+        // screen overflows the viewport (settings ran off the bottom on iOS).
+        'max-[47.5rem]:grid-rows-[auto_minmax(0,1fr)]',
         className
       )}
     >
@@ -53,6 +58,9 @@ export function OverlaySidebar({ children, className }: OverlaySidebarProps) {
         // pt clears the floating titlebar/header; the bg itself fills from the
         // card's top edge so there's no surface-colored gap above the sidebar.
         'flex min-h-0 flex-col gap-0.5 overflow-y-auto bg-(--ui-sidebar-surface-background) px-2.5 pb-3 pt-[calc(var(--titlebar-height)+1rem)]',
+        // [kaveri fork] Cap the stacked nav height on the phone so it scrolls
+        // within itself and leaves the main pane room (see split-layout note).
+        'max-[47.5rem]:max-h-[38vh]',
         className
       )}
     >

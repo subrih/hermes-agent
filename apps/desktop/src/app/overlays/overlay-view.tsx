@@ -49,6 +49,9 @@ export function OverlayView({
 
   return (
     <div
+      // [kaveri fork] data-slot lets mobile-ios.css pad this fixed overlay by the
+      // safe-area insets so the card clears the Dynamic Island / home indicator.
+      data-slot="overlay-root"
       className="fixed inset-0 z-50 bg-black/22 p-3 backdrop-blur-[0.125rem] sm:p-6"
       onClick={event => {
         if (event.target === event.currentTarget) {
