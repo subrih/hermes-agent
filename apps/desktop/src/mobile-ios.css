@@ -50,15 +50,19 @@
     height: 100% !important;
     max-height: 100% !important;
     box-sizing: border-box;
-    /* Precise safe areas via env() (contentInset:'never' + viewport-fit=cover). */
-    padding-top: env(safe-area-inset-top);
-    padding-bottom: env(safe-area-inset-bottom);
+    /* Precise safe areas. Prefer the native --safe-* vars (HermesBridgeView-
+     * Controller publishes the controller view's real UIKit safeAreaInsets,
+     * correct from the first layout) and fall back to env() — which WKWebView
+     * reports as 0 until its first layout pass settles (the bug that dropped the
+     * bottom rail into the home-indicator dead-zone until a keyboard show/hide). */
+    padding-top: var(--safe-top, env(safe-area-inset-top));
+    padding-bottom: var(--safe-bottom, env(safe-area-inset-bottom));
     /* The titlebar control clusters are position:fixed (viewport-anchored), so
      * the shell padding can't move them — pin their --titlebar-controls-top
      * (inline 6px) to the safe-area boundary (just under the status bar / Island;
      * can't go higher without hitting the status-bar time/battery). !important
      * beats the inline value. */
-    --titlebar-controls-top: env(safe-area-inset-top) !important;
+    --titlebar-controls-top: var(--safe-top, env(safe-area-inset-top)) !important;
   }
 
   /* Drawer backdrop: dims + captures taps to close, but ONLY over the exposed
@@ -131,14 +135,15 @@
   }
 
   /* The sidebar drawer is position:fixed (ignores the shell's safe-area padding),
-   * so pad its own top/bottom. Floor both with fallbacks: env() reports 0 until
-   * iOS's first layout pass, which left the profile rail in the home-indicator
-   * dead-zone at the very bottom — untappable until a keyboard show/hide forced
-   * the layout to settle. The floor lifts the rail above it from launch. */
+   * so pad its own top/bottom. Use the native --safe-* vars (real UIKit insets,
+   * correct from launch) with an env() fallback. This is what keeps the bottom
+   * profile rail clear of the home-indicator dead-zone WITHOUT a hardcoded floor:
+   * env() alone reported 0 until a keyboard show/hide, dropping the rail's lower
+   * half into the system-gesture strip so only the top of each pill was tappable. */
   [data-platform='ios'] [data-pane-id='chat-sidebar'] {
     box-sizing: border-box;
-    padding-top: env(safe-area-inset-top);
-    padding-bottom: env(safe-area-inset-bottom);
+    padding-top: var(--safe-top, env(safe-area-inset-top));
+    padding-bottom: var(--safe-bottom, env(safe-area-inset-bottom));
   }
 
   /* Touch targets: the profile-rail pills are sized for a mouse (~1.25rem) —
