@@ -12,6 +12,25 @@ function locationParam(): { location?: { lat: number; lon: number; accuracy?: nu
   const loc = getLatestLocation()
   return loc ? { location: loc } : {}
 }
+
+// [kaveri fork] Attach the active profile to a turn (spread into prompt.submit).
+// CRITICAL for app-global remote mode: the single remote dashboard process runs
+// at the cockpit HERMES_HOME, and the live-chat WS handler ignores the URL
+// `?profile=` param. The gateway DOES support per-call profile scoping — it
+// reads `params.profile`, binds that profile's HERMES_HOME + state.db, and runs
+// the turn there — but only if the client sends it. Without this every session
+// (even one opened under finance/logistics) pins to cockpit. On Electron each
+// profile has its own backend process so the launch profile is already correct;
+// passing the profile is harmless there (resolves to the launch profile). We
+// resolve the session's bound profile first, then the new-chat pick, then the
+// active gateway profile; omit for the default/primary profile.
+function profileParam(sessionId?: string | null): { profile?: string } {
+  const fromSession = sessionId
+    ? $sessions.get().find(s => s.id === sessionId)?.profile
+    : undefined
+  const key = normalizeProfileKey(fromSession ?? $newChatProfile.get() ?? $activeGatewayProfile.get())
+  return key && key !== 'default' ? { profile: key } : {}
+}
 import { translateNow, type Translations, useI18n } from '@/i18n'
 import { branchGroupForUser, type ChatMessage, chatMessageText, textPart } from '@/lib/chat-messages'
 import {
@@ -445,7 +464,7 @@ export function usePromptActions({
           await syncImageAttachmentsForSubmit(sessionId, attachments, {
             updateComposerAttachments: usingComposerAttachments
           })
-          await requestGateway('prompt.submit', { session_id: sessionId, text, ...locationParam() })
+          await requestGateway('prompt.submit', { session_id: sessionId, text, ...locationParam(), ...profileParam(sessionId) })
         } catch (submitErr) {
           const rebound = isSessionNotFoundError(submitErr) ? await rebindActiveSession() : null
 
@@ -458,7 +477,7 @@ export function usePromptActions({
           await syncImageAttachmentsForSubmit(rebound, attachments, {
             updateComposerAttachments: usingComposerAttachments
           })
-          await requestGateway('prompt.submit', { session_id: rebound, text, ...locationParam() })
+          await requestGateway('prompt.submit', { session_id: rebound, text, ...locationParam(), ...profileParam(rebound) })
         }
 
         if (usingComposerAttachments) {
@@ -1005,6 +1024,7 @@ export function usePromptActions({
           session_id: activeSessionId,
           text: userText,
           ...locationParam(),
+          ...profileParam(activeSessionId),
           truncate_before_user_ordinal: truncateBeforeUserOrdinal
         })
       } catch (err) {
@@ -1062,6 +1082,7 @@ export function usePromptActions({
           session_id: sessionId,
           text,
           ...locationParam(),
+          ...profileParam(sessionId),
           ...(truncateOrdinal !== undefined && { truncate_before_user_ordinal: truncateOrdinal })
         })
 
