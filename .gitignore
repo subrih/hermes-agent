@@ -123,3 +123,6 @@ scripts/out/
 # stores the published notes. They are not a build artifact and must never be
 # committed to the repo root. See the hermes-release skill.
 RELEASE_v*.md
+
+# [kaveri fork] local iOS build wrapper — reads login-keychain pw from keychain
+scripts/build-ota.sh
