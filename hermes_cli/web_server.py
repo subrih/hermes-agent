@@ -1548,6 +1548,32 @@ async def image_upload(payload: ImageUploadRequest, request: Request):
     return {"ok": True, "path": temp_path, "name": filename or os.path.basename(temp_path)}
 
 
+# [kaveri fork] Push-notification device registration. The app registers its
+# APNs device token here on launch; the gateway sends alerts to it when a turn
+# completes while the app is away / on proactive messages. See push_notify.py.
+class DeviceRegistrationRequest(BaseModel):
+    token: str
+    platform: Optional[str] = "ios"
+
+
+@app.post("/api/notifications/register")
+async def notifications_register(payload: DeviceRegistrationRequest, request: Request):
+    _require_token(request)
+    from hermes_cli import push_notify
+
+    push_notify.register_device((payload.token or "").strip(), payload.platform or "ios")
+    return {"ok": True, "configured": push_notify.is_configured()}
+
+
+@app.post("/api/notifications/unregister")
+async def notifications_unregister(payload: DeviceRegistrationRequest, request: Request):
+    _require_token(request)
+    from hermes_cli import push_notify
+
+    push_notify.unregister_device((payload.token or "").strip())
+    return {"ok": True}
+
+
 class TTSSpeakRequest(BaseModel):
     text: str
 

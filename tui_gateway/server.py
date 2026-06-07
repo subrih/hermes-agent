@@ -4592,6 +4592,32 @@ def _start_notification_poller(sid: str, session: dict) -> threading.Event:
     return stop
 
 
+# [kaveri fork] Push an APNs alert when a turn completes, so a remote iOS app
+# that's backgrounded/closed surfaces the reply. Runs off-thread (never delays
+# turn finalize); iOS suppresses the banner when foregrounded. No-op until the
+# APNs key is configured AND a device has registered (push_notify).
+def _notify_on_complete(session: dict, text: str, status: str) -> None:
+    if status != "complete":
+        return
+    body = (text or "").strip()
+    if not body:
+        return
+    profile = (session.get("profile") or "").strip()
+    title = f"Kaveri · {profile}" if profile and profile not in ("default", "cockpit") else "Kaveri"
+    snippet = body[:160] + ("…" if len(body) > 160 else "")
+    session_key = session.get("session_key")
+
+    def _go() -> None:
+        try:
+            from hermes_cli import push_notify
+
+            push_notify.send_ios(title, snippet, data={"session_id": session_key})
+        except Exception:
+            logger.exception("notify_on_complete failed")
+
+    threading.Thread(target=_go, name="apns-notify", daemon=True).start()
+
+
 def _run_prompt_submit(rid, sid: str, session: dict, text: Any) -> None:
     with session["history_lock"]:
         history = list(session["history"])
@@ -4814,6 +4840,7 @@ def _run_prompt_submit(rid, sid: str, session: dict, text: Any) -> None:
             with session["history_lock"]:
                 _clear_inflight_turn(session)
             _emit("message.complete", sid, payload)
+            _notify_on_complete(session, raw, status)
 
             # ── /goal continuation (Ralph-style loop) ─────────────────
             # After every TUI turn, if a /goal is active, ask the judge
