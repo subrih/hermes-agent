@@ -22,8 +22,16 @@
      * This is the single intended "text size" knob; nudge it if it's still off. */
     --dt-base-size: 1.1875rem;
     /* Message text specifically, larger than the chrome — set in px so it's
-     * exact and independent of the base-size scaling above. ~22px reading size. */
-    --conversation-text-font-size: 22px;
+     * exact and independent of the base-size scaling above. 21px reading size. */
+    --conversation-text-font-size: 21px;
+  }
+
+  /* The main composer ("Ask anything") input, matched to the message text at
+   * 21px. It's a contenteditable so it also matches the focus-zoom rule above
+   * (max(16px,1em)); this later, equal-specificity rule wins. >=16px keeps iOS
+   * from auto-zooming on focus. */
+  [data-platform='ios'] [data-slot='composer-rich-input'] {
+    font-size: 21px;
   }
 
   /* iOS auto-zooms when focusing a text field whose font-size is < 16px (it

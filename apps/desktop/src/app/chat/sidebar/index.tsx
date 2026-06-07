@@ -588,7 +588,16 @@ export function ChatSidebar({
         <SidebarGroup className="shrink-0 p-0 pb-2 pt-[calc(var(--titlebar-height)+0.375rem)]">
           <SidebarGroupContent>
             <SidebarMenu className="gap-px">
-              {SIDEBAR_NAV.map(item => {
+              {SIDEBAR_NAV.filter(item => {
+                // [kaveri fork] Trim pointless nav surfaces. Artifacts is hidden
+                // on every platform (unused). Messaging is hidden on iOS — it's
+                // the Telegram/Slack/Discord setup screen (desktop-only, and all
+                // messaging platforms are disabled anyway). Filtering here leaves
+                // the upstream SIDEBAR_NAV array untouched (minimal rebase surface).
+                if (item.id === 'artifacts') return false
+                if (item.id === 'messaging' && document.documentElement.dataset.platform === 'ios') return false
+                return true
+              }).map(item => {
                 const isInteractive = Boolean(item.action) || Boolean(item.route)
 
                 const active =
@@ -597,6 +606,11 @@ export function ChatSidebar({
                   (item.id === 'artifacts' && currentView === 'artifacts')
 
                 const isNewSession = item.id === 'new-session'
+                // [kaveri fork] The drawer is wide on iOS, so keep the text
+                // labels. Desktop hides them when the sidebar is dragged narrow
+                // (≤46.25rem) → icon-only; on the phone that left these nav items
+                // as unlabeled, vaguely-iconed buttons (e.g. skills' symbol-misc).
+                const isIos = document.documentElement.dataset.platform === 'ios'
 
                 return (
                   <SidebarMenuItem key={item.id}>
@@ -626,7 +640,7 @@ export function ChatSidebar({
                       <item.icon className="size-4 shrink-0 text-[color-mix(in_srgb,currentColor_72%,transparent)]" />
                       {sidebarOpen && (
                         <>
-                          <span className="min-w-0 flex-1 truncate max-[46.25rem]:hidden">
+                          <span className={cn('min-w-0 flex-1 truncate', !isIos && 'max-[46.25rem]:hidden')}>
                             {s.nav[item.id] ?? item.label}
                           </span>
                           {isNewSession && (
