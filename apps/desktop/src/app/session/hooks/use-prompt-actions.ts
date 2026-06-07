@@ -3,6 +3,15 @@ import { type MutableRefObject, useCallback } from 'react'
 
 import { getProfiles, transcribeAudio, uploadImage } from '@/hermes'
 import { optimizeImageDataUrl } from '@/lib/image-optimize'
+import { getLatestLocation } from '@/platform/location'
+
+// [kaveri fork] Attach the iOS device's recent location to a turn (spread into
+// prompt.submit). Empty off iOS / when no fresh fix. The gateway turns it into
+// an ephemeral "near me / directions" context note.
+function locationParam(): { location?: { lat: number; lon: number; accuracy?: number; ts: number } } {
+  const loc = getLatestLocation()
+  return loc ? { location: loc } : {}
+}
 import { translateNow, type Translations, useI18n } from '@/i18n'
 import { branchGroupForUser, type ChatMessage, chatMessageText, textPart } from '@/lib/chat-messages'
 import {
@@ -436,7 +445,7 @@ export function usePromptActions({
           await syncImageAttachmentsForSubmit(sessionId, attachments, {
             updateComposerAttachments: usingComposerAttachments
           })
-          await requestGateway('prompt.submit', { session_id: sessionId, text })
+          await requestGateway('prompt.submit', { session_id: sessionId, text, ...locationParam() })
         } catch (submitErr) {
           const rebound = isSessionNotFoundError(submitErr) ? await rebindActiveSession() : null
 
@@ -449,7 +458,7 @@ export function usePromptActions({
           await syncImageAttachmentsForSubmit(rebound, attachments, {
             updateComposerAttachments: usingComposerAttachments
           })
-          await requestGateway('prompt.submit', { session_id: rebound, text })
+          await requestGateway('prompt.submit', { session_id: rebound, text, ...locationParam() })
         }
 
         if (usingComposerAttachments) {
@@ -995,6 +1004,7 @@ export function usePromptActions({
         await requestGateway('prompt.submit', {
           session_id: activeSessionId,
           text: userText,
+          ...locationParam(),
           truncate_before_user_ordinal: truncateBeforeUserOrdinal
         })
       } catch (err) {
@@ -1051,6 +1061,7 @@ export function usePromptActions({
         requestGateway('prompt.submit', {
           session_id: sessionId,
           text,
+          ...locationParam(),
           ...(truncateOrdinal !== undefined && { truncate_before_user_ordinal: truncateOrdinal })
         })
 

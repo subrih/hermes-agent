@@ -4346,6 +4346,11 @@ def _(rid, params: dict) -> dict:
     session, err = _sess_nowait(params, rid)
     if err:
         return err
+    # [kaveri fork] iOS clients attach the device location to each turn; stash it
+    # for _run_prompt_submit to inject as an ephemeral, history-free context note.
+    _loc = params.get("location")
+    if isinstance(_loc, dict) and _loc.get("lat") is not None and _loc.get("lon") is not None:
+        session["pending_location"] = _loc
     # Re-bind to the current client transport for this request. This keeps
     # streaming events on the active websocket even if an earlier disconnect
     # or fallback moved the session transport to stdio.
@@ -4618,6 +4623,25 @@ def _notify_on_complete(session: dict, text: str, status: str) -> None:
     threading.Thread(target=_go, name="apns-notify", daemon=True).start()
 
 
+# [kaveri fork] Render a one-line location context note for the ephemeral system
+# prompt. Best-effort; returns "" on bad input.
+def _format_location_note(loc: dict) -> str:
+    try:
+        lat = float(loc["lat"])
+        lon = float(loc["lon"])
+    except (KeyError, TypeError, ValueError):
+        return ""
+    note = f"[Location] The user's current location is approximately latitude {lat:.5f}, longitude {lon:.5f}"
+    acc = loc.get("accuracy")
+    if isinstance(acc, (int, float)) and acc > 0:
+        note += f" (±{int(acc)} m)"
+    note += (
+        ". Use it for 'near me', distance, and directions questions — reverse-geocode "
+        "or search the web/places as needed. Don't mention coordinates unless asked."
+    )
+    return note
+
+
 def _run_prompt_submit(rid, sid: str, session: dict, text: Any) -> None:
     with session["history_lock"]:
         history = list(session["history"])
@@ -4763,7 +4787,23 @@ def _run_prompt_submit(rid, sid: str, session: dict, text: Any) -> None:
                     run_kwargs["task_id"] = session["session_key"]
             except (TypeError, ValueError):
                 pass
-            result = agent.run_conversation(run_message, **run_kwargs)
+            # [kaveri fork] Per-turn location → ephemeral system note (appended at
+            # API-call time, NOT saved to history). Composes with any existing
+            # ephemeral prompt and is restored after, so it never clobbers or
+            # accumulates. Lets "near me"/directions work from the iOS app.
+            _loc = session.pop("pending_location", None)
+            _prev_ephemeral = getattr(agent, "ephemeral_system_prompt", None)
+            if _loc:
+                _note = _format_location_note(_loc)
+                if _note:
+                    agent.ephemeral_system_prompt = (
+                        f"{_note}\n\n{_prev_ephemeral}" if _prev_ephemeral else _note
+                    )
+            try:
+                result = agent.run_conversation(run_message, **run_kwargs)
+            finally:
+                if _loc:
+                    agent.ephemeral_system_prompt = _prev_ephemeral
 
             last_reasoning = None
             status_note = None
