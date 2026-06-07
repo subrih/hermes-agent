@@ -55,7 +55,7 @@
      * on fresh open. Floor it so the header always clears the status bar; once
      * env() populates, max() keeps the true inset (no shift on notched devices). */
     padding-top: max(env(safe-area-inset-top), 59px);
-    padding-bottom: env(safe-area-inset-bottom);
+    padding-bottom: max(env(safe-area-inset-bottom), 34px);
     /* The titlebar control clusters are position:fixed (viewport-anchored), so
      * the shell padding can't move them — push their --titlebar-controls-top
      * (inline 6px) below the status bar. !important beats the inline value. */
@@ -82,6 +82,15 @@
   [data-platform='ios'] #mobile-drawer-backdrop.is-open {
     opacity: 1;
     pointer-events: auto;
+  }
+
+  /* When the drawer is open, the main chat behind it (esp. the composer, which is
+   * position:absolute z-30) must not steal taps that land on the drawer — the
+   * drawer's own z-index is trapped in a nested stacking context, so the composer
+   * was winning the hit-test under the pills ("clicks the text box"). Disable its
+   * pointer events while the drawer is open; selecting a session reopens it. */
+  [data-platform='ios'].mobile-drawer-open [data-pane-main='true'] {
+    pointer-events: none !important;
   }
 
   /* Collapse the PaneShell grid to one column. The grid sets
@@ -123,9 +132,14 @@
   }
 
   /* The sidebar drawer is position:fixed (ignores the shell's safe-area padding),
-   * so pad its own top so its header clears the notch when open. */
+   * so pad its own top/bottom. Floor both with fallbacks: env() reports 0 until
+   * iOS's first layout pass, which left the profile rail in the home-indicator
+   * dead-zone at the very bottom — untappable until a keyboard show/hide forced
+   * the layout to settle. The floor lifts the rail above it from launch. */
   [data-platform='ios'] [data-pane-id='chat-sidebar'] {
-    padding-top: env(safe-area-inset-top);
+    box-sizing: border-box;
+    padding-top: max(env(safe-area-inset-top), 59px);
+    padding-bottom: max(env(safe-area-inset-bottom), 34px);
   }
 
   /* Touch targets: the profile-rail pills are sized for a mouse (~1.25rem) —

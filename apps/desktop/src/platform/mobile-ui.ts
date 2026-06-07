@@ -88,6 +88,9 @@ export function initMobileUi(): void {
   })
 
   installDrawerBackdrop()
+  // Mark the document while the drawer is open so the main chat behind it stops
+  // intercepting taps (mobile-ios.css disables [data-pane-main] pointer-events).
+  $sidebarOpen.subscribe(open => document.documentElement.classList.toggle('mobile-drawer-open', open))
   suppressLaunchAutofocus()
   // Keyboard handling is native now (capacitor.config Keyboard.resize='native'):
   // the WKWebView resizes itself, so the layout tracks the keyboard with no
