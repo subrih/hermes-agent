@@ -15,6 +15,7 @@ import { queryClient } from './lib/query-client'
 import { initIosBridge } from './platform/ios-bridge' // [kaveri fork] no-op off Capacitor
 import { runLiveUpdate } from './platform/live-update' // [kaveri fork] no-op off Capacitor
 import { initMobileUi } from './platform/mobile-ui' // [kaveri fork] no-op off Capacitor
+import { initPushNotifications } from './platform/push' // [kaveri fork] iOS push reg, no-op off Capacitor
 import { ThemeProvider } from './themes/context'
 
 installClipboardShim()
@@ -54,6 +55,8 @@ async function bootstrap() {
   void runLiveUpdate()
   // [kaveri fork] iOS: mobile interaction defaults (open on chat, drawer dismiss).
   initMobileUi()
+  // [kaveri fork] iOS: register for push notifications (device token → gateway).
+  void initPushNotifications()
 }
 
 void bootstrap()

@@ -22,13 +22,18 @@ echo "==> Refreshing web bundle…"
 npm --prefix /Users/kaveri/kaveri/src/apps/desktop run build >/dev/null
 ( cd /Users/kaveri/kaveri/src/apps/mobile && npx cap sync ios >/dev/null )
 
-echo "==> Archiving UNSIGNED (we sign ad-hoc with the Distribution cert at export)…"
+echo "==> Archiving SIGNED (automatic) so the App/App.entitlements — incl."
+echo "    aps-environment for push — is embedded; the unsigned-archive path"
+echo "    stripped entitlements, which dropped push. Needs the App ID to have"
+echo "    Push Notifications enabled (Apple portal) + the keychain key-partition"
+echo "    fix already applied. Re-signed ad-hoc at export below."
 rm -rf "$ARCH" "$EXPORT"
 xcodebuild archive \
   -project App.xcodeproj -scheme App -configuration Release \
   -destination 'generic/platform=iOS' \
   -archivePath "$ARCH" -derivedDataPath build \
-  CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" CODE_SIGN_ENTITLEMENTS=""
+  -allowProvisioningUpdates \
+  DEVELOPMENT_TEAM=M2ATZ7QRW4
 
 echo "==> Exporting ad-hoc IPA + OTA manifest (signs with Apple Distribution / $TEAM)…"
 xcodebuild -exportArchive \

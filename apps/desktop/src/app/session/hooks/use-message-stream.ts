@@ -14,6 +14,7 @@ import {
   upsertToolPart
 } from '@/lib/chat-messages'
 import { coerceGatewayText, coerceThinkingText, normalizePersonalityValue } from '@/lib/chat-runtime'
+import { notifyDesktopReply } from '@/lib/desktop-notify'
 import { triggerHaptic } from '@/lib/haptics'
 import { isProviderSetupErrorMessage } from '@/lib/provider-setup-errors'
 import { setClarifyRequest } from '@/store/clarify'
@@ -437,6 +438,10 @@ export function useMessageStream({
 
   const completeAssistantMessage = useCallback(
     (sessionId: string, text: string) => {
+      // [kaveri fork] Native desktop toast when a reply lands and the window's
+      // unfocused (Mac/Electron only; iOS gets APNs from the gateway).
+      notifyDesktopReply(text)
+
       let shouldHydrate = false
 
       const completedState = updateSessionState(sessionId, state => {
