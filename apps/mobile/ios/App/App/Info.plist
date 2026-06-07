@@ -51,5 +51,9 @@
 	<string>Kaveri uses your location to answer "near me" and directions questions.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>Kaveri uses your location to answer "near me" and directions questions, and for location-aware nudges.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>location</string>
+	</array>
 </dict>
 </plist>

@@ -1631,6 +1631,36 @@ async def gateway_event(payload: GeofenceEventRequest, request: Request):
     return {"ok": True}
 
 
+@app.get("/api/geofences")
+async def get_geofences(request: Request):
+    """Geofence regions for the iOS client to monitor. Seeded server-side at
+    HERMES_HOME/notifications/geofences.json so coords stay off-device/out of git
+    and can be edited without an app rebuild. Shape: [{id,name,lat,lon,radius}]."""
+    _require_token(request)
+    path = get_hermes_home() / "notifications" / "geofences.json"
+    try:
+        data = json.loads(path.read_text())
+        regions = data.get("regions", data) if isinstance(data, dict) else data
+        out = []
+        for r in regions if isinstance(regions, list) else []:
+            try:
+                out.append({
+                    "id": str(r.get("id") or r.get("name")),
+                    "name": str(r.get("name") or r.get("id")),
+                    "lat": float(r["lat"]),
+                    "lon": float(r["lon"]),
+                    "radius": float(r.get("radius", 150)),
+                })
+            except (KeyError, TypeError, ValueError):
+                continue
+        return {"regions": out}
+    except FileNotFoundError:
+        return {"regions": []}
+    except Exception:
+        _log.exception("get_geofences failed")
+        return {"regions": []}
+
+
 class TTSSpeakRequest(BaseModel):
     text: str
 

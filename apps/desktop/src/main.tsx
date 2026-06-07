@@ -15,6 +15,7 @@ import { queryClient } from './lib/query-client'
 import { initIosBridge } from './platform/ios-bridge' // [kaveri fork] no-op off Capacitor
 import { runLiveUpdate } from './platform/live-update' // [kaveri fork] no-op off Capacitor
 import { initMobileUi } from './platform/mobile-ui' // [kaveri fork] no-op off Capacitor
+import { initGeofences } from './platform/geofence' // [kaveri fork] iOS background geofences, no-op off Capacitor
 import { initLocation } from './platform/location' // [kaveri fork] iOS location, no-op off Capacitor
 import { initPushNotifications } from './platform/push' // [kaveri fork] iOS push reg, no-op off Capacitor
 import { ThemeProvider } from './themes/context'
@@ -60,6 +61,8 @@ async function bootstrap() {
   void initPushNotifications()
   // [kaveri fork] iOS: start tracking location to attach to each turn.
   void initLocation()
+  // [kaveri fork] iOS: register background geofences (enter/exit → autonomous turn).
+  void initGeofences()
 }
 
 void bootstrap()

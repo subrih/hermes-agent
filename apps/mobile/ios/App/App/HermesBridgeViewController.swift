@@ -7,6 +7,7 @@ import UIKit
 class HermesBridgeViewController: CAPBridgeViewController {
     override open func capacitorDidLoad() {
         bridge?.registerPluginInstance(HermesWSPlugin())
+        bridge?.registerPluginInstance(HermesGeofencePlugin())
     }
 
     // [kaveri fork] Safe-area insets from UIKit → CSS vars.

@@ -50,6 +50,19 @@ async function saveConfig(next: StoredConfig): Promise<void> {
   await Preferences.set({ key: CONFIG_KEY, value: JSON.stringify(next) })
 }
 
+// [kaveri fork] Raw connection details for native plugins that POST to the
+// gateway on their own (e.g. the background geofence plugin, which fires when no
+// JS is loaded). Exposes the CF secret, which the normal config getter masks.
+export async function getNativeConnection(): Promise<
+  { url: string; token: string; cfId: string; cfSecret: string } | null
+> {
+  const c = await loadConfig()
+  if (!c.remoteUrl || !c.token) {
+    return null
+  }
+  return { url: c.remoteUrl, token: c.token, cfId: c.cfAccessId ?? '', cfSecret: c.cfAccessSecret ?? '' }
+}
+
 // Merge a settings-UI payload onto the stored config. Token + CF secret are
 // write-only: a blank value keeps the saved one (so re-saving the form without
 // re-typing secrets doesn't wipe them). cfAccessId is non-secret → always set.
