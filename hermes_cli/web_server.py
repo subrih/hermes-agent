@@ -131,6 +131,17 @@ async def _lifespan(app: "FastAPI"):
     app.state.event_channels = {}  # dict[str, set]
     app.state.event_lock = asyncio.Lock()
 
+    # [kaveri fork] The `dashboard` command skips _prepare_agent_startup, so this
+    # process never discovers MCP servers — chat turns would get built-in tools
+    # only (no profile MCP like finance's get_portfolio_summary). Discover them
+    # now for this process's HERMES_HOME. Off-thread + fail-open (see module).
+    try:
+        from hermes_cli import kaveri_profile_router as _kpr
+
+        _kpr.ensure_mcp_discovered()
+    except Exception:
+        _log.exception("kaveri MCP discovery hook failed")
+
     # Desktop-spawned backends (HERMES_DESKTOP=1) fire cron jobs themselves,
     # since the app has no gateway running the scheduler. Server `hermes
     # dashboard` is unaffected — it relies on its own gateway.
@@ -8899,6 +8910,20 @@ async def gateway_ws(ws: WebSocket) -> None:
     if not _ws_request_is_allowed(ws):
         await ws.close(code=4403)
         return
+
+    # [kaveri fork] Per-profile routing: a non-default ?profile= is proxied to
+    # that profile's own loopback dashboard (own HERMES_HOME → own MCP/SOUL/model).
+    # default/cockpit falls through to local in-process handling (unchanged).
+    try:
+        from hermes_cli import kaveri_profile_router as _kpr
+
+        _kpr_profile = ws.query_params.get("profile")
+        _kpr_port = _kpr.target_port(_kpr_profile)
+        if _kpr_port is not None:
+            await _kpr.proxy_ws(ws, _kpr.target_profile_name(_kpr_profile), _kpr_port)
+            return
+    except Exception:
+        _log.exception("profile router hook failed; falling back to local handling")
 
     from tui_gateway.ws import handle_ws
 
