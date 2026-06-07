@@ -36,7 +36,7 @@ _APNS_BUNDLE_ID = "com.kaveri.cockpit"
 _APNS_DEFAULT_KEY_ID = "7ML8YPNFGJ"
 _APNS_HOSTS = ("https://api.push.apple.com", "https://api.sandbox.push.apple.com")
 
-_KEYCHAIN_GET = "/Users/kaveri/sangamam/scripts/keychain-get"
+_KEYCHAIN_GET = "/Users/kaveri/kaveri/scripts/keychain-get"
 
 _lock = threading.Lock()
 _jwt_cache: Dict[str, Any] = {"token": None, "ts": 0.0}
