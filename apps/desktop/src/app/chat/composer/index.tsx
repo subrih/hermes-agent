@@ -1368,12 +1368,18 @@ export function ChatBar({
     />
   )
 
+  // [kaveri fork] Autocorrect/-capitalize are off by default because desktop
+  // users type commands, paths, and code where iOS-style correction is noise.
+  // On the phone that's the opposite of what you want for prose, so turn both
+  // on for iOS only (desktop behavior unchanged).
+  const isIos = typeof document !== 'undefined' && document.documentElement.dataset.platform === 'ios'
+
   const input = (
     <div className={cn('relative', stacked ? 'w-full' : 'min-w-(--composer-input-inline-min-width) flex-1')}>
       <div
         aria-label={t.composer.message}
-        autoCapitalize="off"
-        autoCorrect="off"
+        autoCapitalize={isIos ? 'sentences' : 'off'}
+        autoCorrect={isIos ? 'on' : 'off'}
         className={cn(
           'min-h-(--composer-input-min-height) max-h-(--composer-input-max-height) overflow-y-auto whitespace-pre-wrap break-words [overflow-wrap:anywhere] bg-transparent pb-1 pr-1 pt-1 leading-normal text-foreground outline-none disabled:cursor-not-allowed',
           'empty:before:content-[attr(data-placeholder)] empty:before:text-muted-foreground/60',

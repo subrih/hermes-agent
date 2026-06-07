@@ -35,7 +35,9 @@ import { $activeGatewayProfile, $newChatProfile, ensureGatewayProfile, normalize
 import {
   $busy,
   $messages,
+  $sessions,
   $yoloActive,
+  setActiveSessionId,
   setAwaitingResponse,
   setBusy,
   setMessages,
@@ -43,6 +45,7 @@ import {
   setSessions,
   setYoloActive
 } from '@/store/session'
+import type { SessionResumeResponse } from '@/types/hermes'
 
 import type {
   ClientSessionState,
@@ -89,6 +92,7 @@ interface PromptActionsOptions {
   handleSkinCommand: (arg: string) => string
   refreshSessions: () => Promise<void>
   requestGateway: <T>(method: string, params?: Record<string, unknown>) => Promise<T>
+  runtimeIdByStoredSessionIdRef: MutableRefObject<Map<string, string>>
   selectedStoredSessionIdRef: MutableRefObject<string | null>
   startFreshSessionDraft: () => void
   sttEnabled: boolean
@@ -154,6 +158,7 @@ export function usePromptActions({
   handleSkinCommand,
   refreshSessions,
   requestGateway,
+  runtimeIdByStoredSessionIdRef,
   selectedStoredSessionIdRef,
   startFreshSessionDraft,
   sttEnabled,
@@ -161,6 +166,48 @@ export function usePromptActions({
 }: PromptActionsOptions) {
   const { t } = useI18n()
   const copy = t.desktop
+
+  // [kaveri fork] Self-heal a stale runtime session id. The backend mints a
+  // fresh runtime id underneath us whenever its process changes — a gateway
+  // restart, a pooled-profile backend getting idle-reaped + respawned, or
+  // auto-compaction rotating the conversation onto a new session_id. After
+  // that, the runtime id the client holds 404s as "session not found". The
+  // resume path already recovers from this; this is the equivalent for the live
+  // send path. Re-resume the stored session to mint a fresh runtime id and
+  // rebind it (mirrors resumeSession's id wiring: ref + state + cache map),
+  // returning the new id, or null if there's nothing to recover.
+  const rebindActiveSession = useCallback(async (): Promise<null | string> => {
+    const storedId = selectedStoredSessionIdRef.current
+
+    if (!storedId) {
+      return null
+    }
+
+    const profile = $sessions.get().find(session => session.id === storedId)?.profile
+
+    try {
+      const resumed = await requestGateway<SessionResumeResponse>('session.resume', {
+        session_id: storedId,
+        cols: 96,
+        ...(profile ? { profile } : {})
+      })
+
+      if (!resumed?.session_id) {
+        return null
+      }
+
+      setActiveSessionId(resumed.session_id)
+      activeSessionIdRef.current = resumed.session_id
+      runtimeIdByStoredSessionIdRef.current.set(storedId, resumed.session_id)
+
+      return resumed.session_id
+    } catch {
+      return null
+    }
+  }, [activeSessionIdRef, requestGateway, runtimeIdByStoredSessionIdRef, selectedStoredSessionIdRef])
+
+  const isSessionNotFoundError = (error: unknown): boolean =>
+    /session not found/i.test(error instanceof Error ? error.message : String(error))
 
   const appendSessionTextMessage = useCallback(
     (sessionId: string, role: ChatMessage['role'], text: string) => {
@@ -352,7 +399,27 @@ export function usePromptActions({
         await syncImageAttachmentsForSubmit(sessionId, attachments, {
           updateComposerAttachments: usingComposerAttachments
         })
-        await requestGateway('prompt.submit', { session_id: sessionId, text })
+
+        try {
+          await requestGateway('prompt.submit', { session_id: sessionId, text })
+        } catch (submitErr) {
+          // A "session not found" rejection means the backend never accepted the
+          // turn, so re-resuming the stored session and retrying once cannot
+          // double-submit. Any other error (or a failed rebind) falls through to
+          // the normal error handling below.
+          const rebound = isSessionNotFoundError(submitErr) ? await rebindActiveSession() : null
+
+          if (!rebound) {
+            throw submitErr
+          }
+
+          sessionId = rebound
+          seedOptimistic(rebound) // re-anchor the in-flight user bubble + busy flags to the new id
+          await syncImageAttachmentsForSubmit(rebound, attachments, {
+            updateComposerAttachments: usingComposerAttachments
+          })
+          await requestGateway('prompt.submit', { session_id: rebound, text })
+        }
 
         if (usingComposerAttachments) {
           clearComposerAttachments()

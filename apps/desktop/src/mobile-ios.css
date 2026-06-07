@@ -16,6 +16,14 @@
   /* Let the main chat shrink to the full narrow width (desktop reserves 28rem). */
   [data-platform='ios'] {
     --chat-min-width: 0rem;
+    /* The whole UI scales off --dt-base-size (html font-size; desktop default
+     * 0.875rem = 14px). 14px is cramped on a phone, so lift the base on iOS —
+     * everything (text + rem spacing) scales up proportionally. 1.1875rem = 19px.
+     * This is the single intended "text size" knob; nudge it if it's still off. */
+    --dt-base-size: 1.1875rem;
+    /* Message text specifically, larger than the chrome — set in px so it's
+     * exact and independent of the base-size scaling above. ~22px reading size. */
+    --conversation-text-font-size: 22px;
   }
 
   /* iOS auto-zooms when focusing a text field whose font-size is < 16px (it

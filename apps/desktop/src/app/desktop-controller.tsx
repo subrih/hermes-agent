@@ -606,6 +606,7 @@ export function DesktopController() {
       handleSkinCommand,
       refreshSessions,
       requestGateway,
+      runtimeIdByStoredSessionIdRef,
       selectedStoredSessionIdRef,
       startFreshSessionDraft,
       sttEnabled,
