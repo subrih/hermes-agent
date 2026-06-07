@@ -1574,6 +1574,63 @@ async def notifications_unregister(payload: DeviceRegistrationRequest, request: 
     return {"ok": True}
 
 
+# [kaveri fork] Geofence (and other client) events → autonomous agent turn.
+# The iOS app posts here when it crosses a registered region (background); the
+# gateway runs a one-shot agent turn (reusing the cron run_job engine) and, if
+# the agent decides it's worth interrupting (i.e. doesn't reply [SILENT]), pushes
+# the result via APNs. This is the proactive counterpart to the reply trigger.
+class GeofenceEventRequest(BaseModel):
+    region: str
+    action: str = "enter"  # enter | exit
+    type: str = "geofence"
+    lat: Optional[float] = None
+    lon: Optional[float] = None
+
+
+@app.post("/api/event")
+async def gateway_event(payload: GeofenceEventRequest, request: Request):
+    _require_token(request)
+    region = (payload.region or "").strip() or "a place"
+    action = (payload.action or "enter").strip().lower()
+    did = "arrived at" if action != "exit" else "left"
+    where = ""
+    if payload.lat is not None and payload.lon is not None:
+        where = f" (around {float(payload.lat):.4f}, {float(payload.lon):.4f})"
+    prompt = (
+        f"[Geofence event] The user just {did} their '{region}' location{where}. "
+        "Decide if there's something genuinely timely and useful to tell them right now because of "
+        "this — a due reminder, a brief that fits the moment, something time-sensitive. If so, write a "
+        "SHORT push notification (1–2 sentences, no preamble). If there's nothing worth interrupting "
+        "them for, reply with exactly [SILENT]."
+    )
+
+    def _go() -> None:
+        try:
+            from cron.scheduler import SILENT_MARKER, run_job
+            from hermes_cli import push_notify
+
+            job = {
+                "id": f"geofence-{region}-{action}",
+                "name": f"geofence:{region}:{action}",
+                "prompt": prompt,
+                "no_agent": False,
+            }
+            success, _doc, final_response, err = run_job(job)
+            final = (final_response or "").strip()
+            if not success:
+                _log.warning("geofence event %s/%s failed: %s", region, action, err)
+                return
+            if not final or SILENT_MARKER in final.upper():
+                _log.info("geofence event %s/%s → silent", region, action)
+                return
+            push_notify.send_ios("Kaveri", final, data={"type": "geofence", "region": region})
+        except Exception:
+            _log.exception("geofence event handler failed")
+
+    threading.Thread(target=_go, name="geofence-event", daemon=True).start()
+    return {"ok": True}
+
+
 class TTSSpeakRequest(BaseModel):
     text: str
 
