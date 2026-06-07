@@ -37,6 +37,53 @@ function isImagePath(filePath: string): boolean {
   return IMAGE_EXTENSION_PATTERN.test(filePath)
 }
 
+// [kaveri fork] iOS image picking. There's no native file-dialog bridge on iOS,
+// but WKWebView opens the Photos/Camera/Files picker for a plain <input
+// type=file>. We turn the chosen File into a data-URL attachment (no path) —
+// the submit flow uploads those bytes to the gateway (see use-prompt-actions /
+// /api/image/upload). Mirrors the desktop path-based attach, byte-based.
+function isIosPlatform(): boolean {
+  return typeof document !== 'undefined' && document.documentElement.dataset.platform === 'ios'
+}
+
+function readBlobAsDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+
+    reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '')
+    reader.onerror = () => reject(reader.error || new Error('image read failed'))
+    reader.readAsDataURL(blob)
+  })
+}
+
+function pickImageFilesViaInput(): Promise<File[]> {
+  return new Promise(resolve => {
+    const input = document.createElement('input')
+
+    input.type = 'file'
+    input.accept = 'image/*'
+    input.multiple = true
+    input.style.position = 'fixed'
+    input.style.left = '-9999px'
+
+    let settled = false
+    const done = (files: File[]) => {
+      if (settled) {
+        return
+      }
+      settled = true
+      input.remove()
+      resolve(files)
+    }
+
+    input.addEventListener('change', () => done(input.files ? Array.from(input.files) : []))
+    // Cancel leaves no `change` event — resolve empty shortly after focus returns.
+    window.addEventListener('focus', () => window.setTimeout(() => done([]), 1200), { once: true })
+    document.body.appendChild(input)
+    input.click()
+  })
+}
+
 export interface DroppedFile {
   /** Browser-native File handle. Absent for in-app drags (e.g. project tree). */
   file?: File
@@ -309,6 +356,41 @@ export function useComposerActions({ activeSessionId, currentCwd, requestGateway
     }
   }, [])
 
+  // [kaveri fork] Attach an image by its bytes (data URL) with no filesystem
+  // path — the only shape iOS can produce. The submit flow uploads it.
+  const attachImageData = useCallback(
+    async (blob: Blob, name?: string) => {
+      if (blob.size === 0 || (blob.type && !blob.type.startsWith('image/'))) {
+        return false
+      }
+
+      try {
+        const previewUrl = await readBlobAsDataUrl(blob)
+
+        if (!previewUrl) {
+          return false
+        }
+
+        const label = name || `image${blobExtension(blob)}`
+
+        attachToMain({
+          id: attachmentId('image', `${label}:${blob.size}:${previewUrl.length}`),
+          kind: 'image',
+          label,
+          detail: label,
+          previewUrl
+        })
+
+        return true
+      } catch (err) {
+        notifyError(err, copy.imageAttachFailed)
+
+        return false
+      }
+    },
+    [copy.imageAttachFailed]
+  )
+
   const attachImageBlob = useCallback(
     async (blob: Blob) => {
       if (blob.size === 0) {
@@ -317,6 +399,11 @@ export function useComposerActions({ activeSessionId, currentCwd, requestGateway
 
       if (blob.type && !blob.type.startsWith('image/')) {
         return false
+      }
+
+      // iOS can't write to a gateway path; attach the bytes directly instead.
+      if (isIosPlatform()) {
+        return attachImageData(blob, `pasted${blobExtension(blob)}`)
       }
 
       try {
@@ -337,10 +424,22 @@ export function useComposerActions({ activeSessionId, currentCwd, requestGateway
         return false
       }
     },
-    [attachImagePath, copy.imageAttach, copy.imageAttachFailed, copy.imageWriteFailed]
+    [attachImageData, attachImagePath, copy.imageAttach, copy.imageAttachFailed, copy.imageWriteFailed]
   )
 
   const pickImages = useCallback(async () => {
+    // iOS: open the native Photos/Camera/Files picker (no desktop file dialog),
+    // attach each pick by its bytes.
+    if (isIosPlatform()) {
+      const files = await pickImageFilesViaInput()
+
+      for (const file of files) {
+        await attachImageData(file, file.name)
+      }
+
+      return
+    }
+
     const paths = await window.hermesDesktop?.selectPaths({
       title: copy.attachImages,
       defaultPath: currentCwd || undefined,
@@ -359,7 +458,7 @@ export function useComposerActions({ activeSessionId, currentCwd, requestGateway
     for (const path of paths) {
       await attachImagePath(path)
     }
-  }, [attachImagePath, copy.attachImages, currentCwd, t.composer.images])
+  }, [attachImageData, attachImagePath, copy.attachImages, currentCwd, t.composer.images])
 
   const pasteClipboardImage = useCallback(async () => {
     try {
