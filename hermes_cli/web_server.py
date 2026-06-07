@@ -1596,13 +1596,24 @@ async def gateway_event(payload: GeofenceEventRequest, request: Request):
     where = ""
     if payload.lat is not None and payload.lon is not None:
         where = f" (around {float(payload.lat):.4f}, {float(payload.lon):.4f})"
-    prompt = (
-        f"[Geofence event] The user just {did} their '{region}' location{where}. "
-        "Decide if there's something genuinely timely and useful to tell them right now because of "
-        "this — a due reminder, a brief that fits the moment, something time-sensitive. If so, write a "
-        "SHORT push notification (1–2 sentences, no preamble). If there's nothing worth interrupting "
-        "them for, reply with exactly [SILENT]."
-    )
+    # Always greet on arriving home — never go silent for that case.
+    is_home_arrival = action != "exit" and "home" in region.lower()
+    if is_home_arrival:
+        prompt = (
+            f"[Geofence event] The user just {did} their '{region}' location{where}. "
+            "Always greet them with a SHORT, warm welcome-home push notification (1–2 sentences, no "
+            "preamble) — do NOT reply [SILENT]. If there's anything genuinely timely and useful to add "
+            "(a due reminder, a brief that fits the moment, something time-sensitive), fold it into the "
+            "same message; otherwise just the welcome is fine."
+        )
+    else:
+        prompt = (
+            f"[Geofence event] The user just {did} their '{region}' location{where}. "
+            "Decide if there's something genuinely timely and useful to tell them right now because of "
+            "this — a due reminder, a brief that fits the moment, something time-sensitive. If so, write a "
+            "SHORT push notification (1–2 sentences, no preamble). If there's nothing worth interrupting "
+            "them for, reply with exactly [SILENT]."
+        )
 
     def _go() -> None:
         try:
@@ -1621,8 +1632,12 @@ async def gateway_event(payload: GeofenceEventRequest, request: Request):
                 _log.warning("geofence event %s/%s failed: %s", region, action, err)
                 return
             if not final or SILENT_MARKER in final.upper():
-                _log.info("geofence event %s/%s → silent", region, action)
-                return
+                if is_home_arrival:
+                    # Guarantee a welcome even if the model went silent/empty.
+                    final = "Welcome home! 🏠"
+                else:
+                    _log.info("geofence event %s/%s → silent", region, action)
+                    return
             push_notify.send_ios("Kaveri", final, data={"type": "geofence", "region": region})
         except Exception:
             _log.exception("geofence event handler failed")
